@@ -191,7 +191,7 @@ $userLabel.textContent = `观察对象：${userId}`;
 (async () => {
   let cfg;
   try {
-    const r = await fetch(`${API}/session/${encodeURIComponent(userId)}/config?token=${encodeURIComponent(token)}`);
+    const r = await fetch(`${API}/config?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}`);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       showBanner(`❌ ${err.error || '鉴权失败（token 可能已过期）'}<br>请在微信里重新发「<b>/看板</b>」。`);
@@ -207,7 +207,7 @@ $userLabel.textContent = `观察对象：${userId}`;
 
   // ── 2. 拉最近历史 ──
   try {
-    const r = await fetch(`${API}/session/${encodeURIComponent(userId)}/history?token=${encodeURIComponent(token)}&limit=50`);
+    const r = await fetch(`${API}/history?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}&limit=50`);
     if (r.ok) {
       const data = await r.json();
       if (data.messages && data.messages.length) {
@@ -226,7 +226,7 @@ $userLabel.textContent = `观察对象：${userId}`;
   // ── 3. 连接 Pusher，订阅 private channel ──
   const pusher = new Pusher(cfg.pusher_key, {
     cluster: cfg.pusher_cluster,
-    authEndpoint: `${API}/pusher/auth?token=${encodeURIComponent(token)}`,
+    authEndpoint: `${API}/pusher-auth?token=${encodeURIComponent(token)}`,
   });
 
   pusher.connection.bind('connected', () => setStatus('● 实时连接中', 'connected'));
