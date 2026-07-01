@@ -1,0 +1,16 @@
+# LLM（DeepSeek 经 LangChain，OpenAI 兼容）
+langchain-openai>=0.2
+langchain-core>=0.3
+# 配置 / 数据
+python-dotenv>=1.0
+pydantic>=2.0
+tiktoken>=0.7          # 短期记忆压缩的 token 估算（纯 CPU，无模型）
+# iLink 渠道
+requests>=2.31
+qrcode>=7.4
+# 自助开通 API
+fastapi>=0.110
+uvicorn>=0.29
+# 通讯录表格解析 + 中英文名拼音匹配
+openpyxl>=3.1
+pypinyin>=0.50

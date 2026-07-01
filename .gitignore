@@ -1,0 +1,22 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+data/*.db
+data/ilink_token.json
+data/accounts/
+secrets/
+.DS_Store
+
+# 含服务器密码/密钥路径，勿提交（当敏感文件对待）
+项目交接文档.md
+
+# IDE / 编辑器
+.idea/
+
+# Claude Code 本地权限白名单
+.claude/settings.local.json
+
+# 运行日志
+*.log
+run.log
