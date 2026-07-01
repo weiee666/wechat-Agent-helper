@@ -131,16 +131,20 @@ async def pusher_auth(request: Request, token: str = ""):
     """Pusher private channel 订阅签名端点。
 
     浏览器 subscribe 前会 POST form-encoded body: socket_id + channel_name；
-    我们用 token 换 user_id，验证 channel_name 就是该 user 的 channel，签名后返回。"""
+    我们用 token 换 user_id，验证 channel_name 就是该 user 的 channel，签名后返回。
+    手动 parse_qs 避免依赖 python-multipart。"""
+    from urllib.parse import parse_qs
+
     who = dashboard_tokens.lookup(token)
     if who is None:
         return JSONResponse({"error": "token 无效或已过期"}, status_code=401)
-    form = await request.form()
-    socket_id = form.get("socket_id") or ""
-    channel_name = form.get("channel_name") or ""
-    if not socket_id or not channel_name:
+    body_bytes = await request.body()
+    form = parse_qs(body_bytes.decode("utf-8", errors="ignore"))
+    socket_id = (form.get("socket_id") or [""])[0]
+    channel_name_val = (form.get("channel_name") or [""])[0]
+    if not socket_id or not channel_name_val:
         return JSONResponse({"error": "缺少 socket_id 或 channel_name"}, status_code=400)
-    sig = realtime.auth_subscribe(who, socket_id, channel_name)
+    sig = realtime.auth_subscribe(who, socket_id, channel_name_val)
     if sig is None:
         return JSONResponse({"error": "签名失败（channel 与 user 不匹配 或 Pusher 未配置）"},
                             status_code=403)
