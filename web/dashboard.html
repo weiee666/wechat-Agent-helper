@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>weixin-agent 旁观面板</title>
+<script src="https://js.pusher.com/8.2/pusher.min.js"></script>
+<style>
+  :root {
+    --bg: #f5f5f7;
+    --card: #ffffff;
+    --user-bg: #e3f2fd;
+    --reply-bg: #e8f5e9;
+    --thinking-bg: #fff9c4;
+    --tool-call-bg: #ffe0b2;
+    --tool-out-bg: #f8bbd0;
+    --system-bg: #eeeeee;
+    --text: #1c1c1e;
+    --muted: #86868b;
+    --border: #d2d2d7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    position: sticky;
+    top: 0;
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    z-index: 10;
+  }
+  header h1 {
+    font-size: 15px;
+    margin: 0;
+    font-weight: 600;
+  }
+  header .meta { font-size: 12px; color: var(--muted); }
+  #status { font-size: 12px; padding: 4px 10px; border-radius: 12px; background: #f0f0f5; color: var(--muted); }
+  #status.connected { background: #d4edda; color: #155724; }
+  #status.error { background: #f8d7da; color: #721c24; }
+  main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  .divider {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11px;
+    margin: 20px 0 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .event {
+    background: var(--card);
+    border-radius: 12px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    animation: fadeIn 0.2s ease-out;
+  }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .event .type {
+    font-size: 11px;
+    color: var(--muted);
+    font-weight: 500;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .event .content {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-size: 14px;
+  }
+  .event.user_message { background: var(--user-bg); }
+  .event.assistant_reply { background: var(--reply-bg); }
+  .event.verbose_thinking { background: var(--thinking-bg); }
+  .event.verbose_tool_call { background: var(--tool-call-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
+  .event.verbose_tool_out { background: var(--tool-out-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
+  .event.system { background: var(--system-bg); color: var(--muted); font-size: 12px; }
+  #banner {
+    max-width: 900px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    border-radius: 12px;
+    color: #856404;
+    text-align: center;
+  }
+  #banner code { background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>weixin-agent 旁观面板</h1>
+    <div class="meta" id="userLabel">加载中…</div>
+  </div>
+  <div id="status">连接中…</div>
+</header>
+<main id="root"></main>
+
+<script>
+const $status = document.getElementById('status');
+const $root = document.getElementById('root');
+const $userLabel = document.getElementById('userLabel');
+
+const params = new URLSearchParams(location.search);
+const token = params.get('token');
+const userId = params.get('user_id');
+
+// 后端代理走 Vercel serverless（web/api/dashboard/[...path].js）
+const API = '/api/dashboard';
+
+function setStatus(text, cls) {
+  $status.textContent = text;
+  $status.className = cls || '';
+}
+
+function showBanner(msg) {
+  const div = document.createElement('div');
+  div.id = 'banner';
+  div.innerHTML = msg;
+  document.body.insertBefore(div, document.querySelector('main'));
+}
+
+function addDivider(text) {
+  const div = document.createElement('div');
+  div.className = 'divider';
+  div.textContent = text;
+  $root.appendChild(div);
+}
+
+// 按类型渲染事件
+const TYPE_LABEL = {
+  user: '👤 用户',
+  user_message: '👤 用户',
+  assistant: '🤖 助理',
+  assistant_reply: '🤖 助理',
+  system: 'ℹ️ 系统',
+  verbose_thinking: '💭 思考',
+  verbose_tool_call: '🔧 工具调用',
+  verbose_tool_out: '↩️ 工具结果',
+  verbose: '💭 思考流',
+};
+
+function addEvent(type, content, historical = false) {
+  const div = document.createElement('div');
+  div.className = 'event ' + type;
+  const typeEl = document.createElement('div');
+  typeEl.className = 'type';
+  const label = document.createElement('span');
+  label.textContent = TYPE_LABEL[type] || type;
+  const time = document.createElement('span');
+  time.textContent = historical ? '' : new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  typeEl.appendChild(label);
+  typeEl.appendChild(time);
+  const contentEl = document.createElement('div');
+  contentEl.className = 'content';
+  contentEl.textContent = content;
+  div.appendChild(typeEl);
+  div.appendChild(contentEl);
+  $root.appendChild(div);
+  // 只在非历史模式自动滚到底
+  if (!historical) window.scrollTo(0, document.body.scrollHeight);
+}
+
+if (!token || !userId) {
+  showBanner('❌ 缺少 <code>token</code> 或 <code>user_id</code> 参数。<br>请在微信里向 bot 发一句「<b>/看板</b>」，bot 会回带正确参数的 URL。');
+  setStatus('参数缺失', 'error');
+  throw new Error('missing params');
+}
+
+$userLabel.textContent = `观察对象：${userId}`;
+
+// ── 1. bootstrap: 拿 Pusher 公开凭据 + 校验 token ──
+(async () => {
+  let cfg;
+  try {
+    const r = await fetch(`${API}/session/${encodeURIComponent(userId)}/config?token=${encodeURIComponent(token)}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      showBanner(`❌ ${err.error || '鉴权失败（token 可能已过期）'}<br>请在微信里重新发「<b>/看板</b>」。`);
+      setStatus('鉴权失败', 'error');
+      return;
+    }
+    cfg = await r.json();
+  } catch (e) {
+    showBanner(`❌ 连接后端失败：${e.message}`);
+    setStatus('连接失败', 'error');
+    return;
+  }
+
+  // ── 2. 拉最近历史 ──
+  try {
+    const r = await fetch(`${API}/session/${encodeURIComponent(userId)}/history?token=${encodeURIComponent(token)}&limit=50`);
+    if (r.ok) {
+      const data = await r.json();
+      if (data.messages && data.messages.length) {
+        addDivider('── 最近 ' + data.messages.length + ' 条历史 ──');
+        for (const m of data.messages) {
+          addEvent(m.role, m.content, true);
+        }
+        addDivider('── 实时开始 ──');
+      }
+    }
+  } catch (e) {
+    console.warn('历史加载失败', e);
+  }
+  window.scrollTo(0, document.body.scrollHeight);
+
+  // ── 3. 连接 Pusher，订阅 private channel ──
+  const pusher = new Pusher(cfg.pusher_key, {
+    cluster: cfg.pusher_cluster,
+    authEndpoint: `${API}/pusher/auth?token=${encodeURIComponent(token)}`,
+  });
+
+  pusher.connection.bind('connected', () => setStatus('● 实时连接中', 'connected'));
+  pusher.connection.bind('disconnected', () => setStatus('已断开', 'error'));
+  pusher.connection.bind('error', () => setStatus('连接错误', 'error'));
+
+  const channel = pusher.subscribe(cfg.channel);
+  channel.bind('pusher:subscription_error', (e) => {
+    console.error('订阅失败', e);
+    setStatus('订阅失败', 'error');
+  });
+
+  // 6 种事件（后端 realtime.py）
+  ['user_message', 'assistant_reply',
+   'verbose_thinking', 'verbose_tool_call', 'verbose_tool_out',
+   'system_event'].forEach(evt => {
+    channel.bind(evt, (data) => addEvent(evt === 'system_event' ? 'system' : evt, data.text || ''));
+  });
+})();
+</script>
+</body>
+</html>

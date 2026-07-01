@@ -14,3 +14,5 @@ uvicorn>=0.29
 # 通讯录表格解析 + 中英文名拼音匹配
 openpyxl>=3.1
 pypinyin>=0.50
+# 实时旁观面板（Pusher pub/sub）
+pusher>=3.3

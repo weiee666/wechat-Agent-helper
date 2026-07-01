@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 
+from app import realtime
 from app.agent.runner import VoiceTaskAgent
 from app.channel import ilink
 
@@ -13,21 +14,35 @@ logger = logging.getLogger("weixin-agent.poller")
 
 _agent = VoiceTaskAgent()
 
+# runner 的 kind → realtime 事件名映射
+_REALTIME_EVENT = {
+    "thinking": "verbose_thinking",
+    "tool_call": "verbose_tool_call",
+    "tool_out": "verbose_tool_out",
+}
 
-def _build_reply(msg: dict, token: str) -> tuple[str, bool]:
-    """返回 (回复文本, 是否发送)。录制中途累积时不发送（静默不打扰）。
-    详细模式下，中间过程通过 emit 实时推给微信（用同一 context_token 连发）。"""
+
+def _build_reply(msg: dict, token: str) -> tuple[str, bool, str]:
+    """返回 (回复文本, 是否发送, 用户原文 transcript)。
+    录制中途累积时不发送（静默不打扰）。
+    详细模式下，中间过程通过 emit 实时推给微信（用同一 context_token 连发）；
+    同时通过 realtime_emit 无关 verbose 推到实时面板 Pusher channel。"""
     frm = msg.get("from_user_id") or "default"
     ctx = msg.get("context_token")
 
     def emit(text):
         ilink.send_message(token, frm, text, ctx)
 
+    def realtime_emit(kind, text):
+        event = _REALTIME_EVENT.get(kind, "verbose")
+        realtime.publish(frm, event, {"text": text})
+
     # 用户主键 = from_user_id（微信号），稳定；bot 的 account_id 只用于发消息，不参与数据隔离
-    result = _agent.handle_ilink_message(msg, from_user_id=frm, emit=emit)
+    result = _agent.handle_ilink_message(msg, from_user_id=frm, emit=emit,
+                                         realtime_emit=realtime_emit)
     if result is None:
-        return "（没取到文字内容。若发的是语音且无自带转写，需要再接 STT。）", True
-    return result.reply, result.send
+        return "（没取到文字内容。若发的是语音且无自带转写，需要再接 STT。）", True, ""
+    return result.reply, result.send, result.transcript
 
 
 def poll_account(session: dict, stop_event: threading.Event) -> None:
@@ -49,12 +64,17 @@ def poll_account(session: dict, stop_event: threading.Event) -> None:
                 ctx = msg.get("context_token")
                 logger.info("[%s] 收到 %s 的消息，处理中", account_id, frm)
                 try:
-                    reply, send = _build_reply(msg, token)
+                    reply, send, transcript = _build_reply(msg, token)
                 except Exception as e:  # noqa: BLE001
-                    reply, send = f"⚠️ 处理出错：{e}", True
+                    reply, send, transcript = f"⚠️ 处理出错：{e}", True, ""
                     logger.exception("[%s] 处理消息失败", account_id)
+                # 推用户消息到实时面板（用 transcript，可能是语音转写后的文本）
+                if transcript and frm:
+                    realtime.publish(frm, "user_message", {"text": transcript})
                 if send and reply:
                     ilink.send_message(token, frm, reply, ctx)
+                    if frm:
+                        realtime.publish(frm, "assistant_reply", {"text": reply})
                 else:
                     logger.info("[%s] 录制中累积，静默不回复", account_id)
         except Exception as e:  # noqa: BLE001

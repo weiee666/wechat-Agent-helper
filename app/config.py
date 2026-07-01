@@ -58,3 +58,16 @@ DIRECTORY_SYNC_TOKEN = os.getenv("DIRECTORY_SYNC_TOKEN", "")
 def gdrive_ready() -> bool:
     from pathlib import Path as _P
     return bool(GDRIVE_FOLDER_ID and _P(GDRIVE_KEY_FILE).exists())
+
+
+# ── 实时旁观面板（Pusher）──────────────────────────────────
+PUSHER_APP_ID = os.getenv("PUSHER_APP_ID", "").strip()
+PUSHER_KEY = os.getenv("PUSHER_KEY", "").strip()
+PUSHER_SECRET = os.getenv("PUSHER_SECRET", "").strip()
+PUSHER_CLUSTER = os.getenv("PUSHER_CLUSTER", "").strip()
+# 面板前端页面 URL（Vercel 部署后填）；带 ?token=xxx&user_id=yyy 分发给用户
+DASHBOARD_URL_BASE = os.getenv("DASHBOARD_URL_BASE", "").strip()
+
+
+def pusher_ready() -> bool:
+    return bool(PUSHER_APP_ID and PUSHER_KEY and PUSHER_SECRET and PUSHER_CLUSTER)

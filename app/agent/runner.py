@@ -15,7 +15,7 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 
 import re
 
-from app import config, stt
+from app import config, dashboard_tokens, stt
 from app.agent import memory_bridge, summarizer, tools as agent_tools
 from app.agent.llm import get_llm
 from app.core.memory.recording import RecordingStore
@@ -40,6 +40,8 @@ _CANCEL_PHRASES = {"取消记录", "退出记录", "不记了", "取消", "算�
 _VERBOSE_ON = {"打开思考过程", "显示思考过程", "详细模式", "打开详细模式", "显示过程",
                "打开过程", "开启详细模式", "显示工具调用", "打开调试"}
 _VERBOSE_OFF = {"关闭思考过程", "关闭详细模式", "简洁模式", "关闭过程", "隐藏思考过程", "关闭调试"}
+# 旁观面板触发语：签发一次性 token，返回带 token 的 web URL
+_DASHBOARD_TRIGGERS = {"看板", "打开看板", "旁观面板", "面板", "dashboard", "/看板", "/dashboard"}
 
 _START_MSG = "🎙️ 开始记录，你尽管说，我先攒着不打断；说完发一句『就这些』我来整理。"
 
@@ -74,9 +76,12 @@ def _history_to_messages(history: list[Message]) -> list:
 
 
 class VoiceTaskAgent:
-    def handle_text(self, text: str, user_id: str = "default", emit=None) -> Result:
+    def handle_text(self, text: str, user_id: str = "default", emit=None,
+                    realtime_emit=None) -> Result:
         # 用户主键 = user_id（= from_user_id 微信号），记忆/任务/联系人全按它隔离
         # emit(text)：可选回调，用于把中间过程实时推给微信（详细模式）
+        # realtime_emit(kind, text)：可选回调，不管 verbose 都调用；kind ∈ {thinking, tool_call, tool_out}
+        # 用于把 Agent 中间过程 fanout 到实时面板（Pusher channel）
 
         # ── 录制会话拦截（确定性，不依赖 LLM）──
         rec = RecordingStore()
@@ -110,12 +115,36 @@ class VoiceTaskAgent:
             UserSettingsStore().set_verbose(user_id, False)
             return Result(transcript=text, reply="已关闭详细模式，恢复简洁回复。", used_tool=True)
 
+        # ── 旁观面板：签发一次性 token 并返回带 token 的 URL ──
+        if cleaned in _DASHBOARD_TRIGGERS:
+            if not config.DASHBOARD_URL_BASE:
+                return Result(transcript=text, used_tool=True,
+                              reply="ℹ️ 旁观面板尚未配置（管理员需设置 DASHBOARD_URL_BASE + PUSHER_* 环境变量）。")
+            token = dashboard_tokens.issue(user_id)
+            sep = "&" if "?" in config.DASHBOARD_URL_BASE else "?"
+            url = f"{config.DASHBOARD_URL_BASE}{sep}token={token}&user_id={user_id}"
+            return Result(transcript=text, used_tool=True,
+                          reply=f"🔭 旁观面板（1 小时内有效）：\n{url}")
+
         verbose = UserSettingsStore().get_verbose(user_id)
 
-        def _say(t):
-            if verbose and emit and t and str(t).strip():
+        # emoji 前缀（微信显示用）
+        _EMOJI = {"thinking": "💭", "tool_call": "🔧", "tool_out": "↩️"}
+
+        def _say(kind: str, text: str):
+            """把中间过程同时推给微信（verbose 时）和实时面板（总是）。"""
+            s = str(text).strip()
+            if not s:
+                return
+            emoji = _EMOJI.get(kind, "")
+            if verbose and emit:
                 try:
-                    emit(str(t))
+                    emit(f"{emoji} {s}" if emoji else s)
+                except Exception:  # noqa: BLE001
+                    pass
+            if realtime_emit:
+                try:
+                    realtime_emit(kind, s)
                 except Exception:  # noqa: BLE001
                     pass
 
@@ -144,14 +173,14 @@ class VoiceTaskAgent:
                 reply = ai.content or ""
                 break
             used_tool = True
-            # 详细模式：把模型调工具前的思考推给微信
+            # 详细模式 + 实时面板：把模型调工具前的思考推出去
             if ai.content:
-                _say(f"💭 {ai.content}")
+                _say("thinking", ai.content)
             messages.append(ai)  # 记下"模型决定调工具"这一轮
             for tc in calls:
                 args = tc.get("args") or {}
                 arg_str = "、".join(f"{k}={v}" for k, v in args.items() if k not in ("user_id",))
-                _say(f"🔧 调用 {tc['name']}({arg_str})")
+                _say("tool_call", f"调用 {tc['name']}({arg_str})")
                 tool = agent_tools.BY_NAME.get(tc["name"])
                 if tool is None:
                     out = f"[未知工具 {tc['name']}]"
@@ -162,7 +191,7 @@ class VoiceTaskAgent:
                     except Exception as e:  # noqa: BLE001
                         out = f"[工具 {tc['name']} 执行失败] {e}"
                 out = str(out)
-                _say(f"↩️ {out[:400]}")
+                _say("tool_out", out[:400])
                 if tc["name"] == "structure_task":
                     memory_bridge.store_longterm(user_id, out, {"type": "task"})
                 messages.append(ToolMessage(content=out, tool_call_id=tc["id"]))  # 结果回填
@@ -178,12 +207,14 @@ class VoiceTaskAgent:
         memory_bridge.save_turn(user_id, MessageRole.ASSISTANT, reply)
         return Result(transcript=text, reply=reply, used_tool=used_tool)
 
-    def handle_ilink_message(self, msg: dict, from_user_id: str = "default", emit=None) -> Result | None:
+    def handle_ilink_message(self, msg: dict, from_user_id: str = "default", emit=None,
+                              realtime_emit=None) -> Result | None:
         transcript = stt.transcribe_ilink_message(msg)
         if not transcript:
             return None
         # 用户主键 = from_user_id（微信号），稳定、与人一一对应；不再用 account_id(bot)
-        return self.handle_text(transcript, user_id=from_user_id, emit=emit)
+        return self.handle_text(transcript, user_id=from_user_id, emit=emit,
+                                realtime_emit=realtime_emit)
 
 
 if __name__ == "__main__":
