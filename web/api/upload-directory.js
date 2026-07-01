@@ -5,8 +5,8 @@ export const config = { api: { bodyParser: false } };
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'method not allowed' });
-  const base = process.env.TENCENT_API_BASE;
-  const token = process.env.DIRECTORY_SYNC_TOKEN;
+  const base = (process.env.TENCENT_API_BASE || '').trim();
+  const token = (process.env.DIRECTORY_SYNC_TOKEN || '').trim();
   if (!base || !token) return res.status(500).json({ error: 'TENCENT_API_BASE / DIRECTORY_SYNC_TOKEN 未配置' });
 
   const chunks = [];
