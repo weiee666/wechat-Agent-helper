@@ -22,8 +22,8 @@ jobs:
           if [ "${{ github.ref_name }}" = "beta" ]; then
             echo "DEPLOY_DIR=/home/ubuntu/weixin-agent-beta" >> $GITHUB_ENV
             echo "SERVICE_NAME=weixin-agent-beta.service" >> $GITHUB_ENV
-            echo "HEALTH_PORT=8081" >> $GITHUB_ENV
-            echo "环境=BETA (端口 8081)"
+            echo "HEALTH_PORT=7997" >> $GITHUB_ENV
+            echo "环境=BETA (端口 7997)"
           else
             echo "DEPLOY_DIR=/home/ubuntu/weixin-agent" >> $GITHUB_ENV
             echo "SERVICE_NAME=weixin-agent.service" >> $GITHUB_ENV
@@ -74,6 +74,10 @@ jobs:
              echo ''
              echo '── 已安装的关键依赖 ──'
              ./.venv/bin/pip list --format=columns | grep -iE '^(fastapi|uvicorn|langchain|openai|requests|python-dotenv|pypinyin|openpyxl)' || true
+             echo ''
+             echo '── 同步 systemd unit 到 /etc/systemd/system/ ──'
+             sudo cp deploy/${{ env.SERVICE_NAME }} /etc/systemd/system/${{ env.SERVICE_NAME }}
+             sudo systemctl daemon-reload
              echo ''
              echo '── 重启服务 ${{ env.SERVICE_NAME }} ──'
              sudo systemctl restart ${{ env.SERVICE_NAME }}

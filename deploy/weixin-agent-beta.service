@@ -1,5 +1,5 @@
 [Unit]
-Description=weixin-agent BETA (dev/testing instance on port 8081)
+Description=weixin-agent BETA (dev/testing instance on port 7997)
 After=network-online.target
 Wants=network-online.target
 
@@ -8,7 +8,7 @@ Type=simple
 User=ubuntu
 WorkingDirectory=/home/ubuntu/weixin-agent-beta
 Environment=PYTHONUNBUFFERED=1
-Environment=API_PORT=8081
+Environment=API_PORT=7997
 ExecStart=/home/ubuntu/weixin-agent-beta/.venv/bin/python -m app.main
 Restart=always
 RestartSec=3
