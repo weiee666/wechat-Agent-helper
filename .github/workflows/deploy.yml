@@ -2,14 +2,12 @@ name: Deploy to Server
 
 on:
   push:
-    branches: [main]
+    branches: [main, beta]
   workflow_dispatch: {}
 
 env:
   DEPLOY_HOST: 43.142.81.135
   DEPLOY_USER: ubuntu
-  DEPLOY_DIR: /home/ubuntu/weixin-agent
-  SERVICE_NAME: weixin-agent.service
 
 jobs:
   deploy:
@@ -19,6 +17,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve deploy target by branch
+        run: |
+          if [ "${{ github.ref_name }}" = "beta" ]; then
+            echo "DEPLOY_DIR=/home/ubuntu/weixin-agent-beta" >> $GITHUB_ENV
+            echo "SERVICE_NAME=weixin-agent-beta.service" >> $GITHUB_ENV
+            echo "HEALTH_PORT=8081" >> $GITHUB_ENV
+            echo "环境=BETA (端口 8081)"
+          else
+            echo "DEPLOY_DIR=/home/ubuntu/weixin-agent" >> $GITHUB_ENV
+            echo "SERVICE_NAME=weixin-agent.service" >> $GITHUB_ENV
+            echo "HEALTH_PORT=8080" >> $GITHUB_ENV
+            echo "环境=PROD (端口 8080)"
+          fi
+
       - name: Set up SSH key
         run: |
           mkdir -p ~/.ssh
@@ -27,7 +39,7 @@ jobs:
           ssh-keyscan -H ${{ env.DEPLOY_HOST }} >> ~/.ssh/known_hosts 2>/dev/null
 
       - name: Rsync code to server
-        # 同步代码到服务器，保留服务器上的 .env / data / secrets / .venv
+        # 同步代码到 ${{ env.DEPLOY_DIR }}，保留服务器上的 .env / data / secrets / .venv
         run: |
           rsync -az --delete \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
@@ -51,31 +63,31 @@ jobs:
         run: |
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
-            'set -e
+            "set -e
              cd ${{ env.DEPLOY_DIR }}
-             echo "── 当前 .venv pip 版本 ──"
+             echo '── 当前 .venv pip 版本 ──'
              ./.venv/bin/pip --version
-             echo ""
-             echo "── 安装 / 同步 requirements.txt ──"
+             echo ''
+             echo '── 安装 / 同步 requirements.txt ──'
              ./.venv/bin/pip install --upgrade pip
              ./.venv/bin/pip install --upgrade -r requirements.txt
-             echo ""
-             echo "── 已安装的关键依赖 ──"
-             ./.venv/bin/pip list --format=columns | grep -iE "^(fastapi|uvicorn|langchain|openai|requests|python-dotenv|pypinyin|openpyxl)" || true
-             echo ""
-             echo "── 重启服务 ──"
+             echo ''
+             echo '── 已安装的关键依赖 ──'
+             ./.venv/bin/pip list --format=columns | grep -iE '^(fastapi|uvicorn|langchain|openai|requests|python-dotenv|pypinyin|openpyxl)' || true
+             echo ''
+             echo '── 重启服务 ${{ env.SERVICE_NAME }} ──'
              sudo systemctl restart ${{ env.SERVICE_NAME }}
              sleep 2
              sudo systemctl is-active ${{ env.SERVICE_NAME }}
-             sudo systemctl status ${{ env.SERVICE_NAME }} --no-pager -n 15 || true'
+             sudo systemctl status ${{ env.SERVICE_NAME }} --no-pager -n 15 || true"
 
       - name: Health check
         run: |
           for i in 1 2 3 4 5; do
             if ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
                  ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
-                 'curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8080/healthz 2>/dev/null | grep -qE "^(200|301|302|401|403|404)$"'; then
-              echo "✅ /healthz responding"
+                 "curl -fsS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:${{ env.HEALTH_PORT }}/healthz 2>/dev/null | grep -qE '^(200|301|302|401|403|404)$'"; then
+              echo "✅ /healthz (${{ env.HEALTH_PORT }}) responding"
               exit 0
             fi
             echo "尝试 $i/5 失败，2 秒后重试…"
@@ -84,5 +96,5 @@ jobs:
           echo "❌ Health check failed"
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no \
             ${{ env.DEPLOY_USER }}@${{ env.DEPLOY_HOST }} \
-            'sudo journalctl -u ${{ env.SERVICE_NAME }} -n 40 --no-pager' || true
+            "sudo journalctl -u ${{ env.SERVICE_NAME }} -n 40 --no-pager" || true
           exit 1

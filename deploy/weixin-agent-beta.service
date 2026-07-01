@@ -1,0 +1,17 @@
+[Unit]
+Description=weixin-agent BETA (dev/testing instance on port 8081)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/weixin-agent-beta
+Environment=PYTHONUNBUFFERED=1
+Environment=API_PORT=8081
+ExecStart=/home/ubuntu/weixin-agent-beta/.venv/bin/python -m app.main
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
