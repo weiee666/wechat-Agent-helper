@@ -81,7 +81,8 @@ class BotUsersStore:
             conn.close()
 
     def mark_offline(self, user_id: str) -> None:
-        if not user_id:
+        # 系统 Agent（老师等）永远保持 running，不接受 offline 标记
+        if not user_id or user_id.startswith("system:"):
             return
         conn = get_conn()
         try:
@@ -94,10 +95,13 @@ class BotUsersStore:
             conn.close()
 
     def mark_all_offline(self) -> None:
-        """进程启动初始清零（后续 upsert_running 会把还在的标回来）。"""
+        """进程启动初始清零（后续 upsert_running 会把真实用户标回来）；系统 Agent 跳过。"""
         conn = get_conn()
         try:
-            conn.execute("UPDATE bot_users SET status='offline', updated_at=?", (_now(),))
+            conn.execute(
+                "UPDATE bot_users SET status='offline', updated_at=? WHERE user_id NOT LIKE 'system:%'",
+                (_now(),),
+            )
             conn.commit()
         finally:
             conn.close()
