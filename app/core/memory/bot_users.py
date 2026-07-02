@@ -24,6 +24,7 @@ class BotUser:
     account_id: str
     status: str  # 'running' | 'offline'
     last_seen: str
+    last_ctx: str
     created_at: str
     updated_at: str
 
@@ -33,6 +34,11 @@ def _now() -> str:
 
 
 def _row_to_user(row) -> BotUser:
+    # 兼容旧库：last_ctx 字段可能不存在（会由 _add_column_if_missing 迁移补齐）
+    try:
+        last_ctx = row["last_ctx"] or ""
+    except (IndexError, KeyError):
+        last_ctx = ""
     return BotUser(
         user_id=row["user_id"],
         display_name=row["display_name"],
@@ -40,6 +46,7 @@ def _row_to_user(row) -> BotUser:
         account_id=row["account_id"],
         status=row["status"],
         last_seen=row["last_seen"],
+        last_ctx=last_ctx,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -104,6 +111,20 @@ class BotUsersStore:
             conn.execute(
                 "UPDATE bot_users SET last_seen=? WHERE user_id=?",
                 (_now(), user_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def set_last_ctx(self, user_id: str, ctx: str) -> None:
+        """收到该用户消息时保存 iLink context_token，用于以后主动 push 消息给他。"""
+        if not user_id or not ctx:
+            return
+        conn = get_conn()
+        try:
+            conn.execute(
+                "UPDATE bot_users SET last_ctx=?, last_seen=?, updated_at=? WHERE user_id=?",
+                (ctx, _now(), _now(), user_id),
             )
             conn.commit()
         finally:

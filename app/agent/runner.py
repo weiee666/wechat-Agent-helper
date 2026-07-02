@@ -243,12 +243,13 @@ class VoiceTaskAgent:
 
     def handle_agent_message(self, target_user_id: str, from_user_id: str,
                               from_display_name: str, message: str) -> str:
-        """另一个用户的 Agent 发来的消息，目标 Agent 处理后返回 reply（不发微信）。
+        """另一个用户的 Agent 发来的消息，目标 Agent 处理后返回 reply。
 
-        由 call_agent 工具调用；conversation 里的 round 计数由 call_agent 入口维护，
-        本方法不 reset。target 的思考 / 工具调用推到 target 自己的 realtime channel。"""
-        # target Agent 的中间过程推到 target 自己的看板（call_agent 已经把消息本身推到双方）
+        由 call_agent 工具调用；conversation 里的 round 计数由 call_agent 入口维护。
+        target 的中间过程推到 target 自己的 realtime channel；
+        处理完还会通过 iLink 主动 push 一份通知给 target 本人的微信（若能获取到 ctx_token）。"""
         from app import realtime as _realtime
+        from app.channel import dispatch
         _EVENT = {"thinking": "verbose_thinking", "tool_call": "verbose_tool_call",
                   "tool_out": "verbose_tool_out"}
 
@@ -258,17 +259,33 @@ class VoiceTaskAgent:
                 return
             _realtime.publish(target_user_id, _EVENT.get(kind, "verbose"), {"text": s})
 
-        # target 的记忆上下文
-        prefixed = f"[来自 {from_display_name} 的 Agent] {message}"
-        ctx = memory_bridge.get_context(target_user_id, prefixed)
-        # 让 target Agent 知道自己是谁，谁在跟自己说话
+        # 拿 target 身份
         target = BotUsersStore().get(target_user_id)
-        my_name = (target.agent_name if target and target.agent_name else "你")
+        target_display = (target.display_name if target and target.display_name else "你的用户")
+        target_agent_name = (target.agent_name if target and target.agent_name else "小助手")
+
+        # 前缀标注来源（写进历史里，用户后面可回顾）
+        prefixed = f"[来自 {from_display_name} 的助手] {message}"
+        ctx = memory_bridge.get_context(target_user_id, prefixed)
+
+        # ⚠️ 重写 system 补丁：明确身份 + 代表用户回话 + 允许多轮
         system_extra = (
-            f"\n\n## 特殊场景：本条消息不是你的用户发的，是另一个用户「{from_display_name}」的 Agent。"
-            f"\n你可以决定要不要回复对方 Agent。回复要简洁——如果对方问的是明确问题就直接答；"
-            f"如果对方要你做事、你的用户不在场无法确认，就先答复'我先确认下再回复你'并结束这轮。"
-            f"\n目前对话轮次已到第 {conversation.get_round()} 轮，上限 {conversation.MAX_ROUNDS} 轮。"
+            f"\n\n## 现在的场景：跨 Agent 对话\n"
+            f"你是**{target_display}**的助手（{target_display} 叫你「{target_agent_name}」）。"
+            f"此刻**不是{target_display}在跟你说话**，是另一个用户「{from_display_name}」的助手发来的消息。\n\n"
+            f"关键行为准则：\n"
+            f"1. 你要**代表{target_display}**直接回应对方助手，就像{target_display}授权你处理这件事。"
+            f"绝对不要在回复里说「{target_display}你要不要…」「我问下{target_display}」这种把用户当第三方的话——"
+            f"{target_display}此刻不在对话里，说了对方也看不到，只会让对话卡住。\n"
+            f"2. 社交寒暄类（打招呼、道谢、道歉）：直接得体回应，代表{target_display}说话。\n"
+            f"3. 信息类问题（{target_display} 的日程/偏好/情况）：有把握就答；不确定就说"
+            f"「我不太确定，让 {target_display} 稍后跟你回话」。\n"
+            f"4. 请你/{target_display}做具体的事：能当场应下就应；需要 {target_display} 亲自决定的（比如答应见面时间），"
+            f"先答「让 {target_display} 看到后决定」，然后**结束这轮**（不用调 call_agent 再传话）。\n"
+            f"5. 如果需要**再问对方一个问题**才能把事情说清，就再调用 call_agent 追问。\n"
+            f"6. {target_display} 本人稍后会在微信里看到这轮完整对话——你已代他做过一遍回应，"
+            f"他可以选择接管或补充。你只需**该问答的完成这一轮**。\n\n"
+            f"（当前跨 Agent 轮次 {conversation.get_round()} / 上限 {conversation.MAX_ROUNDS}）"
         )
         messages = [SystemMessage(content=_load_system_prompt() + system_extra)]
         if ctx.long_term_items:
@@ -306,9 +323,27 @@ class VoiceTaskAgent:
                 if tc["name"] == "structure_task":
                     memory_bridge.store_longterm(target_user_id, out, {"type": "task"})
                 messages.append(ToolMessage(content=out, tool_call_id=tc["id"]))
-        # 记录到 target 短期记忆（用户之后可问"刚才 xxx 说了什么"）
+        # 记录到 target 短期记忆
         memory_bridge.save_turn(target_user_id, MessageRole.USER, prefixed)
         memory_bridge.save_turn(target_user_id, MessageRole.ASSISTANT, reply)
+
+        # 主动 push 到 target 本人的微信，让他知道有人在跟他 Agent 交流 + Agent 已代答什么
+        notify = (
+            f"🔔 有 Agent 交流\n"
+            f"「{from_display_name}的助手」对你说：\n{message}\n\n"
+            f"我已代你回复：\n{reply}\n\n"
+            f"（如果不合适或想补充，直接告诉我，我会重新联系对方）"
+        )
+        try:
+            pushed = dispatch.push_to_user(target_user_id, notify)
+            if not pushed:
+                # push 失败也不阻断跨 Agent 对话；只在看板留个 system_event 让 target 打开面板能看到
+                _realtime.publish(target_user_id, "system_event",
+                                  {"text": "有 Agent 消息到达，但无法 push 到你微信（可能你没跟 bot 说过话或 ctx 过期）。上面事件流就是完整交流。"})
+        except Exception as e:  # noqa: BLE001
+            import logging as _log
+            _log.getLogger(__name__).warning("push target 失败: %s", e)
+
         return reply
 
 

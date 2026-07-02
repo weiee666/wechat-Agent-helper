@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS bot_users (
     account_id    TEXT NOT NULL DEFAULT '',
     status        TEXT NOT NULL DEFAULT 'offline',
     last_seen     TEXT NOT NULL DEFAULT '',
+    last_ctx      TEXT NOT NULL DEFAULT '',
     created_at    TEXT NOT NULL DEFAULT '',
     updated_at    TEXT NOT NULL DEFAULT ''
 );
@@ -138,6 +139,7 @@ def _init_db(path: Path) -> None:
         conn.executescript(_SCHEMA)
         # 迁移：给旧库补新增列
         _add_column_if_missing(conn, "tasks", "assignee_email TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "bot_users", "last_ctx TEXT NOT NULL DEFAULT ''")
         conn.commit()
     finally:
         conn.close()

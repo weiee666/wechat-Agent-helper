@@ -15,6 +15,8 @@ logger = logging.getLogger("weixin-agent.manager")
 
 # account_id -> (thread, stop_event, user_id)
 _threads: dict[str, tuple[threading.Thread, threading.Event, str]] = {}
+# user_id -> session（用于 dispatch.push_to_user 按 user_id 查 bot token）
+_sessions_by_user: dict[str, dict] = {}
 _lock = threading.Lock()
 
 
@@ -40,6 +42,8 @@ def add_account(session: dict) -> bool:
                              daemon=True, name=f"poll-{account_id}")
         t.start()
         _threads[account_id] = (t, stop, user_id)
+        if user_id:
+            _sessions_by_user[user_id] = session
     # 同步 bot_users 表：标记为 running（保留已有的 display_name / agent_name）
     if user_id:
         BotUsersStore().upsert_running(user_id=user_id, account_id=account_id)
@@ -72,3 +76,11 @@ def mark_user_offline(user_id: str) -> None:
     """poller 循环退出时调用（session timeout 等），把该用户标为 offline。"""
     if user_id:
         BotUsersStore().mark_offline(user_id)
+        with _lock:
+            _sessions_by_user.pop(user_id, None)
+
+
+def get_user_session(user_id: str) -> dict | None:
+    """按 user_id 拿到对应的 bot session（含 token）；用于主动向该用户 push 消息。"""
+    with _lock:
+        return _sessions_by_user.get(user_id)

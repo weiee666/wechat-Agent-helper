@@ -41,17 +41,19 @@ def start_recording(user_id: UserId = "default") -> str:
 # ── call_agent ──────────────────────────────────────────────
 @tool
 def call_agent(target_name: str, message: str, user_id: UserId = "default") -> str:
-    """向另一个用户的 Agent 发一条消息，由对方 Agent 处理后回复你。target_name 是对方的
-    姓名或对方 Agent 的名字（会在全局 bot 用户表 bot_users 里查找，不是查通讯录）。
+    """向另一个用户的 Agent 发一条消息，由对方 Agent 处理后回复你。target_name 是对方
+    用户的姓名或对方 Agent 的名字（会在全局 bot 用户表 bot_users 里查找，不是查通讯录）。
 
     **触发场景**：用户说「问危博xxx」/「让危博的助手帮我确认xxx」/「跟危博的Agent说xxx」/
     「联系一下危博」/「问下小博xxx」/「你现在去找下危博的助手」这种**要跟另一个用户的
-    助手交流**的意图 → 一定用这个工具，不要用别的工具（本项目没有查通讯录的功能）。
+    助手交流**的意图 → 一定用这个工具（本项目没有查通讯录的功能）。
 
-    重要：
-    - 对方可能不在线，或没设名字找不到，工具会返回明确原因
-    - 两个 Agent 间对话有 5 轮上限，防止无限对话
-    - 对方 Agent 的回复以文本形式返回给你，你要综合它的回复给用户最终答案"""
+    行为规则：
+    - 对方 Agent 会**代表对方直接回你**（对方本人稍后也会在微信里看到这轮完整对话）
+    - 如果对方 Agent 的回复没把事情说清、需要**追问才能完成用户交办的事**，你**可以再次调用
+      call_agent 追问**；两个 Agent 间对话有 {MAX} 轮硬上限（每次 call_agent 算一轮）
+    - 如果对方回复已经足够了，就把结果综合给用户，不用凑轮数
+    - 对方不在线 / 没设名字找不到，工具返回明确原因，你就如实告诉用户""".replace("{MAX}", "5")
     from app import realtime
     from app.agent import conversation
     from app.agent.runner import VoiceTaskAgent

@@ -9,6 +9,7 @@ import time
 from app import realtime
 from app.agent.runner import VoiceTaskAgent
 from app.channel import ilink
+from app.core.memory.bot_users import BotUsersStore
 
 logger = logging.getLogger("weixin-agent.poller")
 
@@ -64,6 +65,12 @@ def poll_account(session: dict, stop_event: threading.Event) -> None:
                 frm = msg.get("from_user_id")
                 ctx = msg.get("context_token")
                 logger.info("[%s] 收到 %s 的消息，处理中", account_id, frm)
+                # 保存最新 context_token，以便之后主动 push（如跨 Agent 消息通知）
+                if frm and ctx:
+                    try:
+                        BotUsersStore().set_last_ctx(frm, ctx)
+                    except Exception:  # noqa: BLE001
+                        pass
                 try:
                     reply, send, transcript = _build_reply(msg, token)
                 except Exception as e:  # noqa: BLE001
