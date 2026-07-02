@@ -36,6 +36,10 @@ _CANCEL_PHRASES = {"取消记录", "退出记录", "不记了", "取消", "算�
 _VERBOSE_ON = {"打开思考过程", "显示思考过程", "详细模式", "打开详细模式", "显示过程",
                "打开过程", "开启详细模式", "显示工具调用", "打开调试"}
 _VERBOSE_OFF = {"关闭思考过程", "关闭详细模式", "简洁模式", "关闭过程", "隐藏思考过程", "关闭调试"}
+# 授权模式开关：开启后，其他 Agent 向本用户微信 push 消息需要本人先在微信里授权（"允许"/"不允许"）
+# 关闭时（默认），Agent 之间对话完全在旁观面板进行，不打扰本人微信
+_AUTH_ON = {"打开授权", "开启授权", "开授权", "打开授权模式"}
+_AUTH_OFF = {"关闭授权", "关授权", "取消授权", "关闭授权模式"}
 # 旁观面板触发语：签发一次性 token，返回带 token 的 web URL
 _DASHBOARD_TRIGGERS = {"看板", "打开看板", "旁观面板", "面板", "dashboard", "/看板", "/dashboard"}
 
@@ -149,6 +153,18 @@ class VoiceTaskAgent:
         if cleaned in _VERBOSE_OFF:
             UserSettingsStore().set_verbose(user_id, False)
             return Result(transcript=text, reply="已关闭详细模式，恢复简洁回复。", used_tool=True)
+
+        # ── 授权模式开关（确定性）──
+        if cleaned in _AUTH_ON:
+            UserSettingsStore().set_require_authorization(user_id, True)
+            return Result(transcript=text, used_tool=True,
+                          reply="🔒 已打开授权模式：以后其他用户的 Agent 想给你微信发消息前，"
+                                "我会在微信里先问你「允许/不允许」。")
+        if cleaned in _AUTH_OFF:
+            UserSettingsStore().set_require_authorization(user_id, False)
+            return Result(transcript=text, used_tool=True,
+                          reply="🔓 已关闭授权模式：Agent 之间的对话默认在旁观面板里进行，"
+                                "不再打扰你的微信。（要在面板里看：说「看板」拿链接）")
 
         # ── 旁观面板：签发一次性 token 并返回带 token 的 URL ──
         if cleaned in _DASHBOARD_TRIGGERS:
@@ -264,14 +280,17 @@ class VoiceTaskAgent:
                                 realtime_emit=realtime_emit)
 
     def handle_agent_message(self, target_user_id: str, from_user_id: str,
-                              from_display_name: str, message: str) -> str:
+                              from_display_name: str, message: str,
+                              request_authorization: bool = False) -> str:
         """另一个用户的 Agent 发来的消息，目标 Agent 处理后返回 reply。
 
         由 call_agent 工具调用；conversation 里的 round 计数由 call_agent 入口维护。
-        target 的中间过程推到 target 自己的 realtime channel；
-        处理完还会通过 iLink 主动 push 一份通知给 target 本人的微信（若能获取到 ctx_token）。"""
+        target 的中间过程推到 target 自己的 realtime channel。
+
+        request_authorization=False（默认）：直连模式，纯计算生成 reply 并 return，不打扰 target 微信
+        request_authorization=True：授权模式，reply 生成后调 bus.request_authorization 请求 target 授权
+        （target 微信收到"允许/不允许"提示；批准后 bus 用令牌 push reply 给 sender）"""
         from app import realtime as _realtime
-        from app.channel import dispatch
         _EVENT = {"thinking": "verbose_thinking", "tool_call": "verbose_tool_call",
                   "tool_out": "verbose_tool_out"}
 
@@ -290,24 +309,24 @@ class VoiceTaskAgent:
         prefixed = f"[来自 {from_display_name} 的助手] {message}"
         ctx = memory_bridge.get_context(target_user_id, prefixed)
 
-        # ⚠️ 重写 system 补丁：明确身份 + 代表用户回话 + 允许多轮
+        # System prompt 补丁：明确身份 + 鼓励多轮对话
         system_extra = (
-            f"\n\n## 现在的场景：跨 Agent 对话\n"
-            f"你是**{target_display}**的助手（{target_display} 叫你「{target_agent_name}」）。"
-            f"此刻**不是{target_display}在跟你说话**，是另一个用户「{from_display_name}」的助手发来的消息。\n\n"
-            f"关键行为准则：\n"
-            f"1. 你要**代表{target_display}**直接回应对方助手，就像{target_display}授权你处理这件事。"
-            f"绝对不要在回复里说「{target_display}你要不要…」「我问下{target_display}」这种把用户当第三方的话——"
-            f"{target_display}此刻不在对话里，说了对方也看不到，只会让对话卡住。\n"
-            f"2. 社交寒暄类（打招呼、道谢、道歉）：直接得体回应，代表{target_display}说话。\n"
-            f"3. 信息类问题（{target_display} 的日程/偏好/情况）：有把握就答；不确定就说"
-            f"「我不太确定，让 {target_display} 稍后跟你回话」。\n"
-            f"4. 请你/{target_display}做具体的事：能当场应下就应；需要 {target_display} 亲自决定的（比如答应见面时间），"
-            f"先答「让 {target_display} 看到后决定」，然后**结束这轮**（不用调 call_agent 再传话）。\n"
-            f"5. 如果需要**再问对方一个问题**才能把事情说清，就再调用 call_agent 追问。\n"
-            f"6. {target_display} 本人稍后会在微信里看到这轮完整对话——你已代他做过一遍回应，"
-            f"他可以选择接管或补充。你只需**该问答的完成这一轮**。\n\n"
-            f"（当前跨 Agent 轮次 {conversation.get_round()} / 上限 {conversation.MAX_ROUNDS}）"
+            f"\n\n## 现在是跨 Agent 对话场景\n"
+            f"你是 **{target_display}** 的助手（{target_display} 叫你「{target_agent_name}」）。"
+            f"此刻**不是 {target_display} 在跟你说话**，是另一个用户「{from_display_name}」的助手发来的消息。"
+            f"你要**代表 {target_display}** 直接跟对方助手对话。\n\n"
+            f"行为准则：\n"
+            f"1. **绝对不要**说「{target_display} 你要不要…」「我问下 {target_display}」这种把用户当第三方的话——"
+            f"{target_display} 此刻不在对话里，说了对方也看不到，只会让对话卡住。\n"
+            f"2. 社交寒暄（打招呼、道谢）：直接得体回一句就够。\n"
+            f"3. **信息类问题**：知道就答；不知道但对方问题里有线索，可以调 call_agent 反问对方澄清"
+            f"（比如对方问「什么时候有空」，你可以反问「你想约什么时间段？」）。\n"
+            f"4. **需要用户拍板的事**（重要决定、约见面时间、承诺任务）：答一句「这需要 {target_display} 本人确认，"
+            f"我稍后帮 ta 转达」就好，不要擅自代 ta 承诺。\n"
+            f"5. **需要澄清才能完成的事**：主动调 call_agent 追问对方（比如对方说「帮我问下时间」，"
+            f"你要反问「什么时间段？什么时区？」才能给出有意义的回复）。轻信直接答会让协作低质量。\n"
+            f"6. 一轮完成不了的**不要硬要一轮完成**——追问几轮换来准确答复远比一句敷衍强。\n"
+            f"7. 5 轮硬上限，超了系统会阻止。当前第 {conversation.get_round()} 轮。"
         )
         messages = [SystemMessage(content=_load_system_prompt() + system_extra)]
         if ctx.long_term_items:
@@ -349,10 +368,9 @@ class VoiceTaskAgent:
         memory_bridge.save_turn(target_user_id, MessageRole.USER, prefixed)
         memory_bridge.save_turn(target_user_id, MessageRole.ASSISTANT, reply)
 
-        # ⚠️ 关键：不直接把 reply 发给 sender —— 改走 kernel bus 请求 target 用户授权。
-        # target 微信会收到"我想给 A 发送 xxx，回复允许/不允许"。
-        # 只有 target 回复"允许"后系统才会把 reply 送到 A 微信（deliver_with_token）。
-        if reply and reply.strip():
+        # 授权模式：走 bus.request_authorization，target 微信收到"允许/不允许"
+        # 默认（直连）模式：什么都不做，reply 由 call_agent 拿走后同步返回给 sender LLM
+        if request_authorization and reply and reply.strip():
             from app.kernel import bus
             asked = bus.request_authorization(
                 agent_user_id=target_user_id,

@@ -90,10 +90,12 @@ CREATE TABLE IF NOT EXISTS user_settings (
 );
 
 -- 每用户偏好：verbose=1 时把思考/工具调用/结果都推到微信（详细模式）。
+-- require_authorization=1 时，其他 Agent 想向本用户微信 push 消息必须先请示（默认 0，Agent 间对话不打扰）。
 CREATE TABLE IF NOT EXISTS user_prefs (
-    user_id    TEXT PRIMARY KEY,
-    verbose    INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL DEFAULT ''
+    user_id                TEXT PRIMARY KEY,
+    verbose                INTEGER NOT NULL DEFAULT 0,
+    require_authorization  INTEGER NOT NULL DEFAULT 0,
+    updated_at             TEXT NOT NULL DEFAULT ''
 );
 
 -- 全局 bot 用户注册表：所有扫码绑定的用户，主键 = from_user_id（微信号）。
@@ -159,6 +161,7 @@ def _init_db(path: Path) -> None:
         # 迁移：给旧库补新增列
         _add_column_if_missing(conn, "tasks", "assignee_email TEXT NOT NULL DEFAULT ''")
         _add_column_if_missing(conn, "bot_users", "last_ctx TEXT NOT NULL DEFAULT ''")
+        _add_column_if_missing(conn, "user_prefs", "require_authorization INTEGER NOT NULL DEFAULT 0")
         conn.commit()
     finally:
         conn.close()

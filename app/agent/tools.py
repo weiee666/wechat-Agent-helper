@@ -42,26 +42,28 @@ def start_recording(user_id: UserId = "default") -> str:
 # ── call_agent ──────────────────────────────────────────────
 @tool
 def call_agent(target_name: str, message: str, user_id: UserId = "default") -> str:
-    """向另一个用户的 Agent 发一条消息，触发跨 Agent 对话。target_name 是对方用户的姓名
-    或对方 Agent 的名字（在全局 bot 用户表 bot_users 里查找，不是通讯录）。
+    """向另一个用户的 Agent 发一条消息，进行跨 Agent 对话。target_name 是对方用户姓名或对方
+    Agent 名字（在全局 bot 用户表里查找，不是通讯录）。
 
-    **触发场景**：用户说「问危博xxx」/「让危博的助手帮我确认xxx」/「联系一下危博」/
-    「跟危博说xxx」这种要跟另一个用户的助手交流的意图 → 用这个工具（本项目没有查通讯录）。
+    **触发场景**：用户说「问XX」/「联系XX」/「跟XX说xxx」/「让XX的助手确认xxx」。
 
-    工作流程（**通信总线** kernel/bus 保证）：
-    1. 系统向对方微信发一条握手："🔔 有 Agent 交流｜{你的用户}的助手对你说 xxx"
-    2. 对方 Agent 处理这条消息，决定要不要回复
-    3. 如果对方 Agent 想回复，会先请求对方用户授权（对方微信弹"允许/不允许"）
-    4. 对方用户回复"允许"后，对方 Agent 的原话直接发到你的用户微信
-    5. 你**不需要等待**、也**不需要综合**回复——发起后就完事了
+    **工作方式（默认直连模式）**：
+    - 对方 Agent 会同步生成回复，作为本工具返回值给你
+    - 消息**不会**打扰对方用户微信（Agent 间对话只在旁观面板显示）
+    - 你要**综合对方的回复**给自己的用户一个自然的回应
+    - 对方的回复如果没把事情说清、需要澄清才能完成用户交办的事，你**可以再次调用 call_agent
+      追问**（5 轮上限，每次 call_agent 算一轮）
+    - 简单社交寒暄（打招呼）1 轮就够；协商类（约时间、确认方案）通常要 2-3 轮
 
-    你的用户会先收到系统通知"✅ 已向 XX 发起对话，等应答"。对方 Agent 后续如果回复，
-    会以对方 Agent 名义**直接**发到你的用户微信，跟你无关。
+    **如果对方开启了"授权模式"**（少见）：
+    - 对方回复需要 ta 本人在微信里"允许"，异步流程
+    - 工具会返回"等待授权"，你告诉用户"已发起，等应答"就好
 
-    5 轮上限（每次 call_agent 算一轮）；对方不在线/找不到时工具会返回明确原因。"""
+    对方不在线 / 找不到 → 工具返回明确原因；你如实告诉用户。"""
     from app import realtime
     from app.agent import conversation
     from app.agent.runner import VoiceTaskAgent
+    from app.core.memory.settings import UserSettingsStore
     from app.kernel import bus
 
     target_name = (target_name or "").strip()
@@ -73,7 +75,7 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     round_num = conversation.inc_round()
     if round_num > conversation.MAX_ROUNDS:
         return (f"[call_agent] 已经和其他 Agent 交换了 {conversation.MAX_ROUNDS} 轮消息，"
-                f"到达上限，本次调用被阻止。请直接回复用户当前进展。")
+                f"到达上限。请直接回复用户当前进展。")
 
     users = BotUsersStore()
     target = users.find_by_name(target_name)
@@ -89,6 +91,7 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     sender = users.get(user_id)
     sender_display = (sender.display_name if sender and sender.display_name else "某个用户")
     target_label = target.display_name or target.user_id
+    target_require_auth = UserSettingsStore().get_require_authorization(target.user_id)
 
     # 双方 channel 都推同一条 agent_conversation 事件，两边看板都能看到这一轮
     def _publish_both(payload: dict) -> None:
@@ -105,35 +108,57 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         "text": message,
     })
 
-    # 通过 kernel bus 发送系统级握手消息到 target 微信
-    handshake_ok = bus.deliver_handshake(
-        from_user_id=user_id, from_display=sender_display,
-        to_user_id=target.user_id, message=message,
-    )
-    if not handshake_ok:
-        return (f"[call_agent] 无法把握手信号送达「{target_label}」的微信（对方还没跟自己的 bot 说过话，"
-                f"没有会话通行证 ctx，或 ctx 已过期）。请告诉用户对方目前联系不上。")
+    # 授权模式开启 → 走异步 push + 授权流（用户 A 会等 B 用户批准）
+    if target_require_auth:
+        handshake_ok = bus.deliver_handshake(
+            from_user_id=user_id, from_display=sender_display,
+            to_user_id=target.user_id, message=message,
+        )
+        if not handshake_ok:
+            return (f"[call_agent] 「{target_label}」开启了授权模式，但无法送达握手到 ta 微信"
+                    f"（ctx 无或已过期）。目前联系不上。")
+        try:
+            VoiceTaskAgent().handle_agent_message(
+                target_user_id=target.user_id, from_user_id=user_id,
+                from_display_name=sender_display, message=message,
+                request_authorization=True,
+            )
+        except Exception as e:  # noqa: BLE001
+            return f"[call_agent] 目标 Agent 处理失败：{e}"
+        bus.deliver_system_notice(
+            user_id,
+            f"✅ 已向「{target_label}」发起对话。ta 开启了授权模式，"
+            f"回复要等 ta 在微信里批准后才会到你这里。"
+        )
+        conversation.mark_reply_pushed()  # A Agent 沉默
+        return (f"[call_agent] 已发起，等对方用户授权。授权模式下你无需综合，"
+                f"回复会稍后由系统推到你用户微信里。请直接结束这一轮。")
 
-    # 触发对方 Agent 处理这条握手消息（内部会调 bus.request_authorization 请求授权）
+    # 默认直连模式：同步拿 reply，不打扰任何用户微信
     try:
-        agent = VoiceTaskAgent()
-        agent.handle_agent_message(
-            target_user_id=target.user_id,
-            from_user_id=user_id,
-            from_display_name=sender_display,
-            message=message,
+        reply = VoiceTaskAgent().handle_agent_message(
+            target_user_id=target.user_id, from_user_id=user_id,
+            from_display_name=sender_display, message=message,
+            request_authorization=False,
         )
     except Exception as e:  # noqa: BLE001
         return f"[call_agent] 目标 Agent 处理失败：{e}"
 
-    # 给发起方（当前用户）微信推一条系统通知："已发起对话"
-    bus.deliver_system_notice(user_id,
-        f"✅ 已向「{target_label}」发起对话。若对方授权回复，回复会自动到你微信。")
-    conversation.mark_reply_pushed()  # 起源 Agent 不用再输出
+    reply = (reply or "").strip() or "（对方未回复）"
+    _publish_both({
+        "round": round_num,
+        "direction": "←",
+        "from": target_label,
+        "from_user_id": target.user_id,
+        "to": sender_display,
+        "to_user_id": user_id,
+        "text": reply,
+    })
 
-    return (f"[call_agent] 已经通过通信总线向「{target_label}」发起握手。"
-            f"若对方用户批准回复，对方 Agent 的原话会由系统直接推到当前用户微信里，"
-            f"你**不用**再综合、不用再总结。直接结束这一轮即可。")
+    return (f"「{target_label}」的助手回复：\n{reply}\n\n"
+            f"[提示] 请综合对方回复给你的用户一个自然的中文回应。用户微信不会自动看到原文。"
+            f"如果对方回复没把事情说清、需要追问才能完成用户交办的事，可以再调用 call_agent 追问"
+            f"（第 {round_num}/{conversation.MAX_ROUNDS} 轮，还剩 {conversation.MAX_ROUNDS - round_num} 次）。")
 
 
 # ── set_my_name ─────────────────────────────────────────────

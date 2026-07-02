@@ -139,65 +139,80 @@ class WeixinAgentExecutor(AgentExecutor):
         # publish WORKING（进入处理）
         await event_queue.enqueue_event(
             _make_status_event(task_id, context_id, TaskState.TASK_STATE_WORKING,
-                               message_text="Received; running internal handshake and authorization")
+                               message_text="Received; processing")
         )
 
-        # 触发内部握手
-        from app.kernel import bus
-        handshake_ok = bus.deliver_handshake(
-            from_user_id="", from_display=self.caller_display,
-            to_user_id=self.target_user_id, message=text,
-        )
-        if not handshake_ok:
-            await event_queue.enqueue_event(
-                _make_status_event(task_id, context_id, TaskState.TASK_STATE_FAILED,
-                                   message_text=f"cannot deliver to {self.target_user_id}: no ctx or offline")
-            )
-            return
-
-        # 触发 B Agent 处理（同步 LangChain LLM，用 to_thread 避免阻塞）
-        # 关联 asyncio.Future 让 resolve_authorization 唤醒我们
-        loop = asyncio.get_running_loop()
-        future: asyncio.Future = loop.create_future()
-        ctx = ExternalTaskContext(loop=loop, future=future,
-                                  sender_display=self.caller_display,
-                                  target_user_id=self.target_user_id)
-        token = task_ctx.set_current(ctx)
+        # 检查 target 是否开启授权模式
+        from app.core.memory.settings import UserSettingsStore
+        require_auth = UserSettingsStore().get_require_authorization(self.target_user_id)
 
         from app.agent.runner import VoiceTaskAgent
 
-        def _run_sync():
-            agent = VoiceTaskAgent()
-            agent.handle_agent_message(
-                target_user_id=self.target_user_id,
-                from_user_id="",
-                from_display_name=self.caller_display,
-                message=text,
+        if require_auth:
+            # 授权模式：先 push 握手到 target 微信，然后等 target 用户在微信里授权
+            from app.kernel import bus
+            handshake_ok = bus.deliver_handshake(
+                from_user_id="", from_display=self.caller_display,
+                to_user_id=self.target_user_id, message=text,
             )
+            if not handshake_ok:
+                await event_queue.enqueue_event(
+                    _make_status_event(task_id, context_id, TaskState.TASK_STATE_FAILED,
+                                       message_text=f"cannot deliver to {self.target_user_id}: no ctx or offline")
+                )
+                return
 
-        try:
-            # 同步逻辑跑在线程里；task_ctx 是 contextvars.ContextVar，能被 to_thread 传播
-            await asyncio.to_thread(_run_sync)
-        finally:
-            task_ctx.reset(token)
+            # 关联 asyncio.Future 让 resolve_authorization 唤醒我们
+            loop = asyncio.get_running_loop()
+            future: asyncio.Future = loop.create_future()
+            ctx = ExternalTaskContext(loop=loop, future=future,
+                                      sender_display=self.caller_display,
+                                      target_user_id=self.target_user_id)
+            token = task_ctx.set_current(ctx)
 
-        # 现在 handle_agent_message 已经调用了 bus.request_authorization
-        # future 会等 B 用户在微信里回复"允许"后 set_result
-        try:
-            reply = await asyncio.wait_for(future, timeout=TASK_TIMEOUT_SECONDS)
-        except asyncio.TimeoutError:
-            await event_queue.enqueue_event(
-                _make_status_event(task_id, context_id, TaskState.TASK_STATE_FAILED,
-                                   message_text=f"timeout waiting for {target.display_name or self.target_user_id} to approve")
-            )
-            return
-        except RuntimeError as e:
-            # target denied
-            await event_queue.enqueue_event(
-                _make_status_event(task_id, context_id, TaskState.TASK_STATE_REJECTED,
-                                   message_text=f"denied: {e}")
-            )
-            return
+            def _run_sync_authorized():
+                VoiceTaskAgent().handle_agent_message(
+                    target_user_id=self.target_user_id,
+                    from_user_id="",
+                    from_display_name=self.caller_display,
+                    message=text,
+                    request_authorization=True,
+                )
+
+            try:
+                await asyncio.to_thread(_run_sync_authorized)
+            finally:
+                task_ctx.reset(token)
+
+            # 现在 handle_agent_message 已经调用了 bus.request_authorization
+            # future 会等 target 用户回复"允许"后 set_result
+            try:
+                reply = await asyncio.wait_for(future, timeout=TASK_TIMEOUT_SECONDS)
+            except asyncio.TimeoutError:
+                await event_queue.enqueue_event(
+                    _make_status_event(task_id, context_id, TaskState.TASK_STATE_FAILED,
+                                       message_text=f"timeout waiting for {target.display_name or self.target_user_id} to approve")
+                )
+                return
+            except RuntimeError as e:
+                await event_queue.enqueue_event(
+                    _make_status_event(task_id, context_id, TaskState.TASK_STATE_REJECTED,
+                                       message_text=f"denied: {e}")
+                )
+                return
+        else:
+            # 直连模式：直接同步跑 handle_agent_message 拿 reply
+            def _run_sync_direct() -> str:
+                return VoiceTaskAgent().handle_agent_message(
+                    target_user_id=self.target_user_id,
+                    from_user_id="",
+                    from_display_name=self.caller_display,
+                    message=text,
+                    request_authorization=False,
+                ) or ""
+            reply = await asyncio.to_thread(_run_sync_direct)
+            if not reply.strip():
+                reply = "（对方未回复）"
 
         # 授权通过，返回 reply
         if target.agent_name:
