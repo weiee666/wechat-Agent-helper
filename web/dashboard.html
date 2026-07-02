@@ -7,8 +7,11 @@
 <script src="https://js.pusher.com/8.2/pusher.min.js"></script>
 <style>
   :root {
-    --bg: #f5f5f7;
-    --card: #ffffff;
+    --bg-chat: #f5f5f5;
+    --bg-side: #f0efee;
+    --bg-side-active: #cfcecd;
+    --bg-side-hover: #dedddc;
+    --bg-card: #ffffff;
     --user-bg: #e3f2fd;
     --reply-bg: #e8f5e9;
     --thinking-bg: #fff9c4;
@@ -18,40 +21,172 @@
     --text: #1c1c1e;
     --muted: #86868b;
     --border: #d2d2d7;
+    --pair-outgoing-bg: #e1f5fe;
+    --pair-incoming-bg: #e8f5e9;
+    --sidebar-w: 260px;
   }
   * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
-    margin: 0;
-    background: var(--bg);
+    background: var(--bg-chat);
     color: var(--text);
     line-height: 1.5;
+    overflow: hidden;
   }
-  header {
-    position: sticky;
-    top: 0;
-    background: var(--card);
+  .wechat-layout {
+    display: flex;
+    height: 100vh;
+  }
+  /* ── 左侧栏 ─────────────────────────── */
+  .sidebar {
+    width: var(--sidebar-w);
+    background: var(--bg-side);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+  }
+  .sidebar-header {
+    padding: 16px;
     border-bottom: 1px solid var(--border);
+    background: var(--bg-side);
+  }
+  .sidebar-header h1 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 6px 0;
+    color: var(--text);
+  }
+  .sidebar-header .who {
+    font-size: 12px;
+    color: var(--muted);
+    word-break: break-all;
+    max-width: 100%;
+  }
+  #status {
+    display: inline-block;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 10px;
+    background: #f0f0f5;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+  #status.connected { background: #d4edda; color: #155724; }
+  #status.error { background: #f8d7da; color: #721c24; }
+  .conv-list {
+    flex: 1;
+    overflow-y: auto;
+  }
+  .conv-section-title {
+    font-size: 11px;
+    color: var(--muted);
+    padding: 12px 16px 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .conv-item {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    cursor: pointer;
+    border-bottom: 1px solid rgba(0,0,0,0.03);
+    transition: background 0.1s;
+    gap: 10px;
+  }
+  .conv-item:hover { background: var(--bg-side-hover); }
+  .conv-item.active { background: var(--bg-side-active); }
+  .conv-item .avatar {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    background: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    flex-shrink: 0;
+  }
+  .conv-item .info {
+    flex: 1;
+    min-width: 0;
+  }
+  .conv-item .name {
+    font-size: 14px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text);
+  }
+  .conv-item .preview {
+    font-size: 12px;
+    color: var(--muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin-top: 2px;
+  }
+  .conv-item .unread {
+    background: #ff4d4f;
+    color: white;
+    font-size: 11px;
+    font-weight: 600;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  /* ── 右侧栏 ─────────────────────────── */
+  .chat-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-chat);
+    min-width: 0;
+  }
+  .chat-header {
     padding: 12px 20px;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
-    z-index: 10;
+    flex-shrink: 0;
   }
-  header h1 {
+  .chat-header .title {
     font-size: 15px;
-    margin: 0;
     font-weight: 600;
   }
-  header .meta { font-size: 12px; color: var(--muted); }
-  #status { font-size: 12px; padding: 4px 10px; border-radius: 12px; background: #f0f0f5; color: var(--muted); }
-  #status.connected { background: #d4edda; color: #155724; }
-  #status.error { background: #f8d7da; color: #721c24; }
-  main {
-    max-width: 900px;
-    margin: 0 auto;
+  .chat-header .subtitle {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .chat-messages {
+    flex: 1;
+    overflow-y: auto;
     padding: 20px;
   }
+  .chat-messages-inner {
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--muted);
+    padding: 40px 20px;
+    text-align: center;
+  }
+  .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
   .divider {
     text-align: center;
     color: var(--muted);
@@ -61,7 +196,7 @@
     letter-spacing: 1px;
   }
   .event {
-    background: var(--card);
+    background: var(--bg-card);
     border-radius: 12px;
     padding: 10px 14px;
     margin-bottom: 8px;
@@ -91,13 +226,8 @@
   .event.verbose_tool_call { background: var(--tool-call-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
   .event.verbose_tool_out { background: var(--tool-out-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
   .event.system { background: var(--system-bg); color: var(--muted); font-size: 12px; }
-  /* Agent 之间对话事件（双方看板都能看到）*/
-  .event.agent_conversation {
-    background: #ede7f6;
-    border-left: 4px solid #7e57c2;
-  }
-  .event.agent_conversation.outgoing { border-left-color: #29b6f6; background: #e1f5fe; }
-  .event.agent_conversation.incoming { border-left-color: #66bb6a; background: #e8f5e9; }
+  .event.agent_conversation.outgoing { background: var(--pair-outgoing-bg); border-left: 4px solid #29b6f6; }
+  .event.agent_conversation.incoming { background: var(--pair-incoming-bg); border-left: 4px solid #66bb6a; }
   .event.agent_conversation .peers {
     font-size: 12px;
     color: #5e35b1;
@@ -105,40 +235,77 @@
     margin-bottom: 4px;
   }
   #banner {
-    max-width: 900px;
-    margin: 20px auto;
-    padding: 20px;
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 500px;
+    padding: 24px 28px;
     background: #fff3cd;
     border: 1px solid #ffeaa7;
     border-radius: 12px;
     color: #856404;
     text-align: center;
+    z-index: 100;
   }
   #banner code { background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; }
 </style>
 </head>
 <body>
-<header>
-  <div>
-    <h1>weixin-agent 旁观面板</h1>
-    <div class="meta" id="userLabel">加载中…</div>
-  </div>
-  <div id="status">连接中…</div>
-</header>
-<main id="root"></main>
+<div class="wechat-layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>旁观面板</h1>
+      <div class="who" id="whoLabel">加载中…</div>
+      <span id="status">连接中…</span>
+    </div>
+    <div class="conv-list" id="convList"></div>
+  </aside>
+  <section class="chat-area">
+    <div class="chat-header">
+      <div>
+        <div class="title" id="chatTitle">选择一个会话</div>
+        <div class="subtitle" id="chatSubtitle"></div>
+      </div>
+    </div>
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-messages-inner" id="chatInner"></div>
+    </div>
+  </section>
+</div>
 
 <script>
 const $status = document.getElementById('status');
-const $root = document.getElementById('root');
-const $userLabel = document.getElementById('userLabel');
+const $whoLabel = document.getElementById('whoLabel');
+const $convList = document.getElementById('convList');
+const $chatTitle = document.getElementById('chatTitle');
+const $chatSubtitle = document.getElementById('chatSubtitle');
+const $chatMessages = document.getElementById('chatMessages');
+const $chatInner = document.getElementById('chatInner');
 
 const params = new URLSearchParams(location.search);
 const token = params.get('token');
 const userId = params.get('user_id');
 
-// 后端代理走 Vercel serverless（web/api/dashboard/[...path].js）
 const API = '/api/dashboard';
 
+// ── 会话数据结构 ──
+// 每个会话：{ id, name, icon, events: [{ type, data, time }], unread }
+const conversations = {
+  self: {
+    id: 'self',
+    name: '我和助手',
+    icon: '🤖',
+    events: [],
+    unread: 0,
+    isPair: false,
+  },
+  // pair-{otherUid}: 动态添加
+};
+let currentConvId = 'self';
+let myAgentName = ''; // 从 config / 后续消息里学到
+
+// ── 工具方法 ──
 function setStatus(text, cls) {
   $status.textContent = text;
   $status.className = cls || '';
@@ -148,89 +315,215 @@ function showBanner(msg) {
   const div = document.createElement('div');
   div.id = 'banner';
   div.innerHTML = msg;
-  document.body.insertBefore(div, document.querySelector('main'));
+  document.body.appendChild(div);
 }
 
-function addDivider(text) {
-  const div = document.createElement('div');
-  div.className = 'divider';
-  div.textContent = text;
-  $root.appendChild(div);
-}
-
-// 按类型渲染事件
 const TYPE_LABEL = {
   user: '👤 用户',
   user_message: '👤 用户',
-  assistant: '🤖 助理',
-  assistant_reply: '🤖 助理',
+  assistant: '🤖 助手',
+  assistant_reply: '🤖 助手',
   system: 'ℹ️ 系统',
   verbose_thinking: '💭 思考',
   verbose_tool_call: '🔧 工具调用',
   verbose_tool_out: '↩️ 工具结果',
-  verbose: '💭 思考流',
-  agent_conversation: '🔀 Agent 对话',
 };
 
-function addEvent(type, content, historical = false) {
+function formatTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  return d.toLocaleTimeString('zh-CN', { hour12: false });
+}
+
+function makeEventEl(evt) {
   const div = document.createElement('div');
-  div.className = 'event ' + type;
+  if (evt.type === 'agent_conversation') {
+    const isMineOutgoing = evt.data.from_user_id === userId;
+    div.className = 'event agent_conversation ' + (isMineOutgoing ? 'outgoing' : 'incoming');
+    const peers = document.createElement('div');
+    peers.className = 'peers';
+    const arrow = evt.data.direction || '→';
+    peers.textContent = `🔀 第 ${evt.data.round || '?'} 轮 · ${evt.data.from} ${arrow} ${evt.data.to}`;
+    const contentEl = document.createElement('div');
+    contentEl.className = 'content';
+    contentEl.textContent = evt.data.text || '';
+    const time = document.createElement('div');
+    time.className = 'type';
+    time.style.marginTop = '4px';
+    time.style.marginBottom = '0';
+    const label = document.createElement('span');
+    label.textContent = isMineOutgoing ? '我方助手发出' : '收到对方助手';
+    const timeSpan = document.createElement('span');
+    timeSpan.textContent = formatTime(evt.time);
+    time.appendChild(label); time.appendChild(timeSpan);
+    div.appendChild(peers); div.appendChild(contentEl); div.appendChild(time);
+    return div;
+  }
+  div.className = 'event ' + evt.type;
   const typeEl = document.createElement('div');
   typeEl.className = 'type';
   const label = document.createElement('span');
-  label.textContent = TYPE_LABEL[type] || type;
+  label.textContent = TYPE_LABEL[evt.type] || evt.type;
   const time = document.createElement('span');
-  time.textContent = historical ? '' : new Date().toLocaleTimeString('zh-CN', { hour12: false });
-  typeEl.appendChild(label);
-  typeEl.appendChild(time);
+  time.textContent = evt.historical ? '' : formatTime(evt.time);
+  typeEl.appendChild(label); typeEl.appendChild(time);
   const contentEl = document.createElement('div');
   contentEl.className = 'content';
-  contentEl.textContent = content;
-  div.appendChild(typeEl);
-  div.appendChild(contentEl);
-  $root.appendChild(div);
-  // 只在非历史模式自动滚到底
-  if (!historical) window.scrollTo(0, document.body.scrollHeight);
+  contentEl.textContent = evt.content || '';
+  div.appendChild(typeEl); div.appendChild(contentEl);
+  return div;
 }
 
-// Agent 对话事件：单独渲染，含 round + 双方名字 + 方向
-function addAgentConversation(data) {
-  const div = document.createElement('div');
-  const isMineOutgoing = data.from_user_id === userId;
-  div.className = 'event agent_conversation ' + (isMineOutgoing ? 'outgoing' : 'incoming');
-  const peers = document.createElement('div');
-  peers.className = 'peers';
-  const arrow = data.direction || '→';
-  peers.textContent = `🔀 第 ${data.round || '?'} 轮 · ${data.from} ${arrow} ${data.to}`;
-  const contentEl = document.createElement('div');
-  contentEl.className = 'content';
-  contentEl.textContent = data.text || '';
-  const time = document.createElement('div');
-  time.className = 'type';
-  time.style.marginTop = '4px';
-  time.style.marginBottom = '0';
-  const label = document.createElement('span');
-  label.textContent = isMineOutgoing ? '我的 Agent 发出' : '收到别人 Agent 的消息';
-  const timeSpan = document.createElement('span');
-  timeSpan.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-  time.appendChild(label);
-  time.appendChild(timeSpan);
-  div.appendChild(peers);
-  div.appendChild(contentEl);
-  div.appendChild(time);
-  $root.appendChild(div);
-  window.scrollTo(0, document.body.scrollHeight);
+// ── 侧栏渲染 ──
+function renderSidebar() {
+  $convList.innerHTML = '';
+  const selfConv = conversations.self;
+  const pairs = Object.values(conversations).filter(c => c.isPair);
+
+  const items = [selfConv, ...pairs];
+  for (const conv of items) {
+    const item = document.createElement('div');
+    item.className = 'conv-item' + (conv.id === currentConvId ? ' active' : '');
+    item.onclick = () => selectConversation(conv.id);
+
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = conv.icon;
+
+    const info = document.createElement('div');
+    info.className = 'info';
+    const name = document.createElement('div');
+    name.className = 'name';
+    name.textContent = conv.name;
+    const preview = document.createElement('div');
+    preview.className = 'preview';
+    preview.textContent = conv.events.length
+      ? previewText(conv.events[conv.events.length - 1])
+      : (conv.isPair ? '暂无对话' : '等待开始…');
+    info.appendChild(name); info.appendChild(preview);
+
+    item.appendChild(avatar); item.appendChild(info);
+    if (conv.unread > 0 && conv.id !== currentConvId) {
+      const badge = document.createElement('span');
+      badge.className = 'unread';
+      badge.textContent = conv.unread > 99 ? '99+' : conv.unread;
+      item.appendChild(badge);
+    }
+    $convList.appendChild(item);
+  }
 }
 
+function previewText(evt) {
+  if (evt.type === 'agent_conversation') {
+    return (evt.data.text || '').slice(0, 40);
+  }
+  const t = TYPE_LABEL[evt.type] || '';
+  return `${t.replace(/[👤🤖💭🔧↩️ℹ️]/g, '').trim()} ${(evt.content || '').slice(0, 30)}`;
+}
+
+// ── 右侧消息区 ──
+function renderChatArea() {
+  const conv = conversations[currentConvId];
+  if (!conv) {
+    $chatInner.innerHTML = '';
+    $chatTitle.textContent = '选择一个会话';
+    $chatSubtitle.textContent = '';
+    return;
+  }
+  $chatTitle.textContent = conv.name;
+  $chatSubtitle.textContent = conv.isPair
+    ? '跨 Agent 对话（对方助手需要在自己微信里授权后才会回复）'
+    : `观察对象：${userId}`;
+  $chatInner.innerHTML = '';
+  if (conv.events.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.innerHTML = conv.isPair
+      ? `<div class="icon">🔀</div>暂无对话内容，等待 Agent 之间交流…`
+      : `<div class="icon">💬</div>暂无对话，去微信里跟你的助手说点什么吧`;
+    $chatInner.appendChild(empty);
+    return;
+  }
+  for (const evt of conv.events) {
+    $chatInner.appendChild(makeEventEl(evt));
+  }
+  requestAnimationFrame(() => {
+    $chatMessages.scrollTop = $chatMessages.scrollHeight;
+  });
+}
+
+function selectConversation(convId) {
+  currentConvId = convId;
+  if (conversations[convId]) conversations[convId].unread = 0;
+  renderSidebar();
+  renderChatArea();
+}
+
+// ── 事件路由 ──
+function pushEvent(convId, evt) {
+  const conv = conversations[convId];
+  if (!conv) return;
+  conv.events.push(evt);
+  if (convId === currentConvId) {
+    // 当前会话：追加渲染
+    if (conv.events.length === 1) {
+      // 从空态过渡到有事件
+      renderChatArea();
+    } else {
+      $chatInner.appendChild(makeEventEl(evt));
+      requestAnimationFrame(() => {
+        $chatMessages.scrollTop = $chatMessages.scrollHeight;
+      });
+    }
+    // 顺便刷新 sidebar 的 preview
+    renderSidebar();
+  } else {
+    conv.unread = (conv.unread || 0) + 1;
+    renderSidebar();
+  }
+}
+
+function routeAgentConversation(data) {
+  const otherUid = data.from_user_id === userId ? data.to_user_id : data.from_user_id;
+  const otherName = data.from_user_id === userId ? data.to : data.from;
+  const myName = data.from_user_id === userId ? data.from : data.to;
+  if (myName && !myAgentName) myAgentName = myName;
+  const convId = `pair-${otherUid}`;
+  if (!conversations[convId]) {
+    conversations[convId] = {
+      id: convId,
+      name: `${myName || '我的助手'} ↔ ${otherName}`,
+      icon: '🔀',
+      events: [],
+      unread: 0,
+      isPair: true,
+      otherUid,
+    };
+  }
+  pushEvent(convId, { type: 'agent_conversation', data, time: Date.now() });
+}
+
+function routeSelfEvent(type, data) {
+  pushEvent('self', {
+    type,
+    content: data.text || '',
+    time: Date.now(),
+  });
+}
+
+// ── 参数校验 ──
 if (!token || !userId) {
   showBanner('❌ 缺少 <code>token</code> 或 <code>user_id</code> 参数。<br>请在微信里向 bot 发一句「<b>/看板</b>」，bot 会回带正确参数的 URL。');
   setStatus('参数缺失', 'error');
   throw new Error('missing params');
 }
 
-$userLabel.textContent = `观察对象：${userId}`;
+$whoLabel.textContent = userId;
 
-// ── 1. bootstrap: 拿 Pusher 公开凭据 + 校验 token ──
+// 初始渲染
+renderSidebar();
+renderChatArea();
+
+// ── bootstrap ──
 (async () => {
   let cfg;
   try {
@@ -248,30 +541,31 @@ $userLabel.textContent = `观察对象：${userId}`;
     return;
   }
 
-  // ── 2. 拉最近历史 ──
+  // 拉历史（都归到 self 会话）
   try {
     const r = await fetch(`${API}/history?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}&limit=50`);
     if (r.ok) {
       const data = await r.json();
       if (data.messages && data.messages.length) {
-        addDivider('── 最近 ' + data.messages.length + ' 条历史 ──');
         for (const m of data.messages) {
-          addEvent(m.role, m.content, true);
+          conversations.self.events.push({
+            type: m.role,
+            content: m.content,
+            time: Date.now(),
+            historical: true,
+          });
         }
-        addDivider('── 实时开始 ──');
+        renderChatArea();
+        renderSidebar();
       }
     }
-  } catch (e) {
-    console.warn('历史加载失败', e);
-  }
-  window.scrollTo(0, document.body.scrollHeight);
+  } catch (e) { console.warn('历史加载失败', e); }
 
-  // ── 3. 连接 Pusher，订阅 private channel ──
+  // Pusher
   const pusher = new Pusher(cfg.pusher_key, {
     cluster: cfg.pusher_cluster,
     authEndpoint: `${API}/pusher-auth?token=${encodeURIComponent(token)}`,
   });
-
   pusher.connection.bind('connected', () => setStatus('● 实时连接中', 'connected'));
   pusher.connection.bind('disconnected', () => setStatus('已断开', 'error'));
   pusher.connection.bind('error', () => setStatus('连接错误', 'error'));
@@ -282,14 +576,15 @@ $userLabel.textContent = `观察对象：${userId}`;
     setStatus('订阅失败', 'error');
   });
 
-  // 6 种基本事件（后端 realtime.py 发出的）
   ['user_message', 'assistant_reply',
    'verbose_thinking', 'verbose_tool_call', 'verbose_tool_out',
    'system_event'].forEach(evt => {
-    channel.bind(evt, (data) => addEvent(evt === 'system_event' ? 'system' : evt, data.text || ''));
+    channel.bind(evt, (data) => {
+      const type = (evt === 'system_event') ? 'system' : evt;
+      routeSelfEvent(type, data);
+    });
   });
-  // Agent 对话事件：结构化数据（round / from / to / text / direction），单独渲染
-  channel.bind('agent_conversation', (data) => addAgentConversation(data));
+  channel.bind('agent_conversation', (data) => routeAgentConversation(data));
 })();
 </script>
 </body>
