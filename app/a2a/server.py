@@ -2,8 +2,9 @@
 """A2A HTTP server：把内部 Agent 暴露为符合 A2A 协议的 endpoint。
 
 挂载路径：
+    GET  /a2a/agents                        → 列出可访问的 Agent
     GET  /a2a/agents/{user_id}/agent-card   → 返回该 Agent 的 AgentCard（JSON）
-    POST /a2a/agents/{user_id}/rpc          → JSON-RPC 收 A2A task（后续实现）
+    POST /a2a/agents/{user_id}/rpc          → JSON-RPC 收 A2A task
 
 所有端点都需要 X-API-Key header 校验。
 """
@@ -11,13 +12,23 @@ from __future__ import annotations
 
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Header, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
 from google.protobuf.json_format import MessageToDict
+
+from a2a.server.agent_execution import SimpleRequestContextBuilder
+from a2a.server.request_handlers import DefaultRequestHandler
+from a2a.server.routes.jsonrpc_dispatcher import JsonRpcDispatcher
+from a2a.server.tasks import InMemoryTaskStore
 
 from app.a2a.api_keys import ApiKeyStore
 from app.a2a.cards import build_agent_card
+from app.a2a.executor import WeixinAgentExecutor
 from app.core.memory.bot_users import BotUsersStore
+
+
+# 全局任务库（跨 request 共享，SDK 用它维护 task 的 status/history）
+_TASK_STORE = InMemoryTaskStore()
 
 router = APIRouter(prefix="/a2a")
 
@@ -50,6 +61,33 @@ def get_agent_card(user_id: str, x_api_key: str = Header(default="")):
 
     card = build_agent_card(user)
     return JSONResponse(MessageToDict(card, preserving_proto_field_name=True))
+
+
+@router.post("/agents/{user_id:path}/rpc")
+async def rpc_endpoint(user_id: str, request: Request,
+                       x_api_key: str = Header(default="")):
+    """A2A JSON-RPC 端点：接收 message/send、tasks/get、tasks/cancel 等请求。
+    Body 是 JSON-RPC 2.0 envelope，SDK 的 JsonRpcDispatcher 分发给 DefaultRequestHandler。"""
+    uid = unquote(user_id)
+    key_meta = _require_api_key(x_api_key, uid)
+
+    user = BotUsersStore().get(uid)
+    if user is None:
+        raise HTTPException(status_code=404, detail=f"No agent for user {uid}")
+    if user.status != "running":
+        raise HTTPException(status_code=503, detail=f"Agent for {uid} is offline")
+
+    # 用 API Key 名字作为 caller 显示名（B 微信里看到"[XX 的助手] ..."）
+    caller_display = key_meta.key_name or "外部 Agent"
+    executor = WeixinAgentExecutor(target_user_id=uid, caller_display=caller_display)
+    card = build_agent_card(user)
+    handler = DefaultRequestHandler(
+        agent_executor=executor,
+        task_store=_TASK_STORE,
+        agent_card=card,
+    )
+    dispatcher = JsonRpcDispatcher(request_handler=handler)
+    return await dispatcher.handle_requests(request)
 
 
 @router.get("/agents")

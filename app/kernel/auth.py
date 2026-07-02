@@ -25,11 +25,14 @@ class PendingAuth:
     id: str
     agent_user_id: str        # Agent 的用户（B），要 Ta 授权
     agent_display: str        # B 的显示名（比如"危呃呃"）
-    target_user_id: str       # 消息要送达的对象（A）
-    target_display: str       # A 的显示名（比如"危博"）
+    target_user_id: str       # 消息要送达的对象（A），外部 A2A caller 为 ''
+    target_display: str       # A 的显示名（比如"危博"或外部 API Key 名字）
     proposed_text: str        # B Agent 想发的话（yyy）
     origin_conversation_round: int  # A→B 是第几轮（跨 Agent 5 轮上限的一部分）
     created_at: float
+    # A2A executor 关联的 future / loop（None 表示纯内部对话，无需 A2A 完成回调）
+    external_loop: object | None = None
+    external_future: object | None = None
 
 
 _pending: dict[str, PendingAuth] = {}          # agent_user_id → PendingAuth（每用户 1 个）
@@ -40,8 +43,11 @@ _lock = threading.Lock()
 # ── pending auth ────────────────────────────────────────────
 def create_pending(agent_user_id: str, agent_display: str,
                    target_user_id: str, target_display: str,
-                   proposed_text: str, conv_round: int) -> PendingAuth:
-    """创建一个新 pending。若该 agent 已有旧 pending，直接覆盖（旧的丢弃）。"""
+                   proposed_text: str, conv_round: int,
+                   external_loop=None, external_future=None) -> PendingAuth:
+    """创建一个新 pending。若该 agent 已有旧 pending，直接覆盖（旧的丢弃）。
+    external_loop / external_future 用于关联 A2A executor 的 asyncio.Future，
+    resolve 时会跨线程唤醒 executor。"""
     now = time.time()
     p = PendingAuth(
         id=secrets.token_urlsafe(8),
@@ -52,6 +58,8 @@ def create_pending(agent_user_id: str, agent_display: str,
         proposed_text=proposed_text,
         origin_conversation_round=conv_round,
         created_at=now,
+        external_loop=external_loop,
+        external_future=external_future,
     )
     with _lock:
         _cleanup_locked()

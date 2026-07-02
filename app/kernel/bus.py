@@ -55,9 +55,23 @@ def request_authorization(agent_user_id: str, agent_display: str,
                           proposed_text: str, conv_round: int = 0) -> bool:
     """B Agent 请求 B 用户授权：向 A 发送 proposed_text。
     B 微信弹一条'我想给 A 发送 xxx，回复允许/不允许'。
-    返回 True = 请求已递交；False = 无法递交（B ctx 无 → 授权流程死路 → sender 端 fallback）。"""
+    返回 True = 请求已递交；False = 无法递交（B ctx 无 → 授权流程死路 → sender 端 fallback）。
+
+    如果当前 handle_agent_message 是被 A2A executor 触发的，会自动把该 executor 的
+    future 关联到 pending，resolve 时跨线程唤醒 executor。"""
     if not agent_user_id or not proposed_text:
         return False
+    # A2A executor 触发的处理会通过 task_ctx 存 future
+    external_loop = None
+    external_future = None
+    try:
+        from app.a2a import task_ctx
+        ctx = task_ctx.get_current()
+        if ctx is not None:
+            external_loop = ctx.loop
+            external_future = ctx.future
+    except ImportError:
+        pass
     auth.create_pending(
         agent_user_id=agent_user_id,
         agent_display=agent_display,
@@ -65,6 +79,8 @@ def request_authorization(agent_user_id: str, agent_display: str,
         target_display=target_display,
         proposed_text=proposed_text,
         conv_round=conv_round,
+        external_loop=external_loop,
+        external_future=external_future,
     )
     prompt = (
         f"📝 授权请求（跨 Agent 对话第 {conv_round} 轮）\n"
@@ -101,13 +117,35 @@ def resolve_authorization(user_id: str, user_reply: str) -> str | None:
         # 颁发令牌并立即消费
         token = auth.issue_token(p.target_user_id, p.proposed_text)
         _deliver_authorized_message(token, p)
+        # 如果本 pending 关联着 A2A executor 的 future，唤醒它让 executor 完成 task
+        _wake_external(p, True, p.proposed_text)
         return "allowed"
     # denied
-    notice = (
-        f"❌ 「{p.agent_display}」的助手准备回复你，但被 {p.agent_display} 拒绝了发送。"
-    )
-    deliver_system_notice(p.target_user_id, notice)
+    if p.target_user_id:
+        notice = (
+            f"❌ 「{p.agent_display}」的助手准备回复你，但被 {p.agent_display} 拒绝了发送。"
+        )
+        deliver_system_notice(p.target_user_id, notice)
+    _wake_external(p, False, "target user denied")
     return "denied"
+
+
+def _wake_external(p, ok: bool, payload_or_reason: str) -> None:
+    """如果 pending 关联了 A2A executor 的 future，跨线程唤醒它。"""
+    if p.external_loop is None or p.external_future is None:
+        return
+    try:
+        if ok:
+            p.external_loop.call_soon_threadsafe(
+                p.external_future.set_result, payload_or_reason,
+            )
+        else:
+            p.external_loop.call_soon_threadsafe(
+                p.external_future.set_exception,
+                RuntimeError(payload_or_reason),
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("唤醒 A2A executor future 失败: %s", e)
 
 
 # ── 4. deliver_with_token ───────────────────────────────────
