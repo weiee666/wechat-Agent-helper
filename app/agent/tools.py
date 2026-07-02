@@ -51,9 +51,9 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     行为规则：
     - 对方 Agent 会**代表对方直接回你**（对方本人稍后也会在微信里看到这轮完整对话）
     - 如果对方 Agent 的回复没把事情说清、需要**追问才能完成用户交办的事**，你**可以再次调用
-      call_agent 追问**；两个 Agent 间对话有 {MAX} 轮硬上限（每次 call_agent 算一轮）
+      call_agent 追问**；两个 Agent 间对话有 5 轮硬上限（每次 call_agent 算一轮）
     - 如果对方回复已经足够了，就把结果综合给用户，不用凑轮数
-    - 对方不在线 / 没设名字找不到，工具返回明确原因，你就如实告诉用户""".replace("{MAX}", "5")
+    - 对方不在线 / 没设名字找不到，工具返回明确原因，你就如实告诉用户"""
     from app import realtime
     from app.agent import conversation
     from app.agent.runner import VoiceTaskAgent
