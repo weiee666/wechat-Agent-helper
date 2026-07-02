@@ -69,12 +69,6 @@ def _make_status_event(task_id: str, context_id: str, state: int,
     ts.GetCurrentTime()
     status.timestamp.CopyFrom(ts)
     ev.status.CopyFrom(status)
-    ev.final = state in (
-        TaskState.TASK_STATE_COMPLETED,
-        TaskState.TASK_STATE_CANCELED,
-        TaskState.TASK_STATE_FAILED,
-        TaskState.TASK_STATE_REJECTED,
-    )
     return ev
 
 
