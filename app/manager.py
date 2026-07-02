@@ -9,6 +9,7 @@ import logging
 import threading
 
 from app.channel import accounts, poller
+from app.core.memory.bot_users import BotUsersStore
 
 logger = logging.getLogger("weixin-agent.manager")
 
@@ -39,12 +40,17 @@ def add_account(session: dict) -> bool:
                              daemon=True, name=f"poll-{account_id}")
         t.start()
         _threads[account_id] = (t, stop, user_id)
+    # 同步 bot_users 表：标记为 running（保留已有的 display_name / agent_name）
+    if user_id:
+        BotUsersStore().upsert_running(user_id=user_id, account_id=account_id)
     logger.info("已起账号收消息线程: %s (userId=%s)", account_id, user_id or "?")
     return True
 
 
 def start_all() -> int:
     """拉起 data/accounts 里所有已登录账号。返回起了几个。"""
+    # 启动时先把所有 bot_users 状态置为 offline；add_account 会把还活着的标回 running
+    BotUsersStore().mark_all_offline()
     sessions = accounts.load_accounts()
     n = sum(1 for s in sessions if add_account(s))
     return n
@@ -59,3 +65,10 @@ def stop_all() -> None:
     with _lock:
         for _t, stop, _u in _threads.values():
             stop.set()
+    BotUsersStore().mark_all_offline()
+
+
+def mark_user_offline(user_id: str) -> None:
+    """poller 循环退出时调用（session timeout 等），把该用户标为 offline。"""
+    if user_id:
+        BotUsersStore().mark_offline(user_id)

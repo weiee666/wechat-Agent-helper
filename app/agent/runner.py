@@ -16,8 +16,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 import re
 
 from app import config, dashboard_tokens, stt
-from app.agent import memory_bridge, summarizer, tools as agent_tools
+from app.agent import conversation, memory_bridge, summarizer, tools as agent_tools
 from app.agent.llm import get_llm
+from app.core.memory.bot_users import BotUsersStore
 from app.core.memory.recording import RecordingStore
 from app.core.memory.settings import UserSettingsStore
 from app.models.enums import MessageRole
@@ -82,6 +83,10 @@ class VoiceTaskAgent:
         # emit(text)：可选回调，用于把中间过程实时推给微信（详细模式）
         # realtime_emit(kind, text)：可选回调，不管 verbose 都调用；kind ∈ {thinking, tool_call, tool_out}
         # 用于把 Agent 中间过程 fanout 到实时面板（Pusher channel）
+
+        # 这是"用户起源消息"—— 重置跨 Agent 对话计数器
+        conversation.reset()
+        conversation.set_origin(user_id)
 
         # ── 录制会话拦截（确定性，不依赖 LLM）──
         rec = RecordingStore()
@@ -203,6 +208,26 @@ class VoiceTaskAgent:
             guide = "💡 顺便：你还没设发任务邮件用的发件邮箱。\n\n" + _email_setup_guide()
             reply = (reply + "\n\n" + guide) if reply.strip() else guide
 
+        # 主动提醒：还没设"自己的名字 / Agent 名字"→ 别人的 Agent 找不到你 → 无法跨 Agent 对话
+        me = BotUsersStore().get(user_id)
+        need_name = not (me and me.display_name)
+        need_agent_name = not (me and me.agent_name)
+        if is_first_contact and (need_name or need_agent_name):
+            hints = []
+            if need_name:
+                hints.append("• 告诉我你叫什么：说「我叫XXX」")
+            if need_agent_name:
+                hints.append("• 给我这个助手起个名字：说「给你起名叫XXX」")
+            profile_guide = ("💡 顺便：设完这些之后，别人的 Agent 就能用你的名字找到你，"
+                             "我们就能相互沟通了：\n" + "\n".join(hints))
+            reply = (reply + "\n\n" + profile_guide) if reply.strip() else profile_guide
+
+        # 更新最后活跃时间
+        try:
+            BotUsersStore().touch_last_seen(user_id)
+        except Exception:  # noqa: BLE001
+            pass
+
         memory_bridge.save_turn(user_id, MessageRole.USER, text)
         memory_bridge.save_turn(user_id, MessageRole.ASSISTANT, reply)
         return Result(transcript=text, reply=reply, used_tool=used_tool)
@@ -215,6 +240,76 @@ class VoiceTaskAgent:
         # 用户主键 = from_user_id（微信号），稳定、与人一一对应；不再用 account_id(bot)
         return self.handle_text(transcript, user_id=from_user_id, emit=emit,
                                 realtime_emit=realtime_emit)
+
+    def handle_agent_message(self, target_user_id: str, from_user_id: str,
+                              from_display_name: str, message: str) -> str:
+        """另一个用户的 Agent 发来的消息，目标 Agent 处理后返回 reply（不发微信）。
+
+        由 call_agent 工具调用；conversation 里的 round 计数由 call_agent 入口维护，
+        本方法不 reset。target 的思考 / 工具调用推到 target 自己的 realtime channel。"""
+        # target Agent 的中间过程推到 target 自己的看板（call_agent 已经把消息本身推到双方）
+        from app import realtime as _realtime
+        _EVENT = {"thinking": "verbose_thinking", "tool_call": "verbose_tool_call",
+                  "tool_out": "verbose_tool_out"}
+
+        def _say(kind: str, text: str):
+            s = str(text).strip()
+            if not s:
+                return
+            _realtime.publish(target_user_id, _EVENT.get(kind, "verbose"), {"text": s})
+
+        # target 的记忆上下文
+        prefixed = f"[来自 {from_display_name} 的 Agent] {message}"
+        ctx = memory_bridge.get_context(target_user_id, prefixed)
+        # 让 target Agent 知道自己是谁，谁在跟自己说话
+        target = BotUsersStore().get(target_user_id)
+        my_name = (target.agent_name if target and target.agent_name else "你")
+        system_extra = (
+            f"\n\n## 特殊场景：本条消息不是你的用户发的，是另一个用户「{from_display_name}」的 Agent。"
+            f"\n你可以决定要不要回复对方 Agent。回复要简洁——如果对方问的是明确问题就直接答；"
+            f"如果对方要你做事、你的用户不在场无法确认，就先答复'我先确认下再回复你'并结束这轮。"
+            f"\n目前对话轮次已到第 {conversation.get_round()} 轮，上限 {conversation.MAX_ROUNDS} 轮。"
+        )
+        messages = [SystemMessage(content=_load_system_prompt() + system_extra)]
+        if ctx.long_term_items:
+            mem = "\n".join(f"- {it.content}" for it in ctx.long_term_items)
+            messages.append(SystemMessage(
+                content="## 用户之前记下的内容（长期记忆）\n" + mem))
+        messages += _history_to_messages(ctx.short_term_messages)
+        messages.append(HumanMessage(content=prefixed))
+
+        llm_with_tools = get_llm().bind_tools(agent_tools.TOOLS)
+        reply = ""
+        for _step in range(_MAX_TOOL_ITERS):
+            ai = llm_with_tools.invoke(messages)
+            calls = getattr(ai, "tool_calls", None)
+            if not calls:
+                reply = ai.content or ""
+                break
+            if ai.content:
+                _say("thinking", ai.content)
+            messages.append(ai)
+            for tc in calls:
+                args = tc.get("args") or {}
+                arg_str = "、".join(f"{k}={v}" for k, v in args.items() if k not in ("user_id",))
+                _say("tool_call", f"调用 {tc['name']}({arg_str})")
+                tool = agent_tools.BY_NAME.get(tc["name"])
+                if tool is None:
+                    out = f"[未知工具 {tc['name']}]"
+                else:
+                    try:
+                        out = tool.invoke({**args, "user_id": target_user_id})
+                    except Exception as e:  # noqa: BLE001
+                        out = f"[工具 {tc['name']} 执行失败] {e}"
+                out = str(out)
+                _say("tool_out", out[:400])
+                if tc["name"] == "structure_task":
+                    memory_bridge.store_longterm(target_user_id, out, {"type": "task"})
+                messages.append(ToolMessage(content=out, tool_call_id=tc["id"]))
+        # 记录到 target 短期记忆（用户之后可问"刚才 xxx 说了什么"）
+        memory_bridge.save_turn(target_user_id, MessageRole.USER, prefixed)
+        memory_bridge.save_turn(target_user_id, MessageRole.ASSISTANT, reply)
+        return reply
 
 
 if __name__ == "__main__":

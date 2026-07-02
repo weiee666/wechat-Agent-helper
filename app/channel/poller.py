@@ -49,6 +49,7 @@ def poll_account(session: dict, stop_event: threading.Event) -> None:
     """长轮询收某账号的消息，处理后回复。token 过期则结束该账号的循环。"""
     token = session["token"]
     account_id = session.get("accountId") or "default"
+    user_id = session.get("userId") or ""
     logger.info("账号 %s 开始收消息", account_id)
 
     buf = ""
@@ -84,4 +85,10 @@ def poll_account(session: dict, stop_event: threading.Event) -> None:
                 break
             logger.warning("账号 %s 轮询出错: %s，3s 后重试", account_id, m)
             time.sleep(3)
+    # 循环退出：session 过期或 stop 触发，都把该用户 bot_users 标为 offline
+    try:
+        from app.manager import mark_user_offline
+        mark_user_offline(user_id)
+    except Exception:  # noqa: BLE001
+        pass
     logger.info("账号 %s 循环结束", account_id)

@@ -91,6 +91,19 @@
   .event.verbose_tool_call { background: var(--tool-call-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
   .event.verbose_tool_out { background: var(--tool-out-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
   .event.system { background: var(--system-bg); color: var(--muted); font-size: 12px; }
+  /* Agent 之间对话事件（双方看板都能看到）*/
+  .event.agent_conversation {
+    background: #ede7f6;
+    border-left: 4px solid #7e57c2;
+  }
+  .event.agent_conversation.outgoing { border-left-color: #29b6f6; background: #e1f5fe; }
+  .event.agent_conversation.incoming { border-left-color: #66bb6a; background: #e8f5e9; }
+  .event.agent_conversation .peers {
+    font-size: 12px;
+    color: #5e35b1;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
   #banner {
     max-width: 900px;
     margin: 20px auto;
@@ -156,6 +169,7 @@ const TYPE_LABEL = {
   verbose_tool_call: '🔧 工具调用',
   verbose_tool_out: '↩️ 工具结果',
   verbose: '💭 思考流',
+  agent_conversation: '🔀 Agent 对话',
 };
 
 function addEvent(type, content, historical = false) {
@@ -177,6 +191,35 @@ function addEvent(type, content, historical = false) {
   $root.appendChild(div);
   // 只在非历史模式自动滚到底
   if (!historical) window.scrollTo(0, document.body.scrollHeight);
+}
+
+// Agent 对话事件：单独渲染，含 round + 双方名字 + 方向
+function addAgentConversation(data) {
+  const div = document.createElement('div');
+  const isMineOutgoing = data.from_user_id === userId;
+  div.className = 'event agent_conversation ' + (isMineOutgoing ? 'outgoing' : 'incoming');
+  const peers = document.createElement('div');
+  peers.className = 'peers';
+  const arrow = data.direction || '→';
+  peers.textContent = `🔀 第 ${data.round || '?'} 轮 · ${data.from} ${arrow} ${data.to}`;
+  const contentEl = document.createElement('div');
+  contentEl.className = 'content';
+  contentEl.textContent = data.text || '';
+  const time = document.createElement('div');
+  time.className = 'type';
+  time.style.marginTop = '4px';
+  time.style.marginBottom = '0';
+  const label = document.createElement('span');
+  label.textContent = isMineOutgoing ? '我的 Agent 发出' : '收到别人 Agent 的消息';
+  const timeSpan = document.createElement('span');
+  timeSpan.textContent = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+  time.appendChild(label);
+  time.appendChild(timeSpan);
+  div.appendChild(peers);
+  div.appendChild(contentEl);
+  div.appendChild(time);
+  $root.appendChild(div);
+  window.scrollTo(0, document.body.scrollHeight);
 }
 
 if (!token || !userId) {
@@ -239,12 +282,14 @@ $userLabel.textContent = `观察对象：${userId}`;
     setStatus('订阅失败', 'error');
   });
 
-  // 6 种事件（后端 realtime.py）
+  // 6 种基本事件（后端 realtime.py 发出的）
   ['user_message', 'assistant_reply',
    'verbose_thinking', 'verbose_tool_call', 'verbose_tool_out',
    'system_event'].forEach(evt => {
     channel.bind(evt, (data) => addEvent(evt === 'system_event' ? 'system' : evt, data.text || ''));
   });
+  // Agent 对话事件：结构化数据（round / from / to / text / direction），单独渲染
+  channel.bind('agent_conversation', (data) => addAgentConversation(data));
 })();
 </script>
 </body>

@@ -95,6 +95,23 @@ CREATE TABLE IF NOT EXISTS user_prefs (
     verbose    INTEGER NOT NULL DEFAULT 0,
     updated_at TEXT NOT NULL DEFAULT ''
 );
+
+-- 全局 bot 用户注册表：所有扫码绑定的用户，主键 = from_user_id（微信号）。
+-- display_name 是用户在别人 Agent 眼里的名字；agent_name 是自己给 Agent 起的名字。
+-- status = 'running' 表示对应 bot 账号线程还在收消息；'offline' = 该用户当前不可达。
+-- 用于"帮我问危博" → 查表定位到危博的 user_id → 触发跨 Agent 对话。
+CREATE TABLE IF NOT EXISTS bot_users (
+    user_id       TEXT PRIMARY KEY,
+    display_name  TEXT NOT NULL DEFAULT '',
+    agent_name    TEXT NOT NULL DEFAULT '',
+    account_id    TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL DEFAULT 'offline',
+    last_seen     TEXT NOT NULL DEFAULT '',
+    created_at    TEXT NOT NULL DEFAULT '',
+    updated_at    TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_bot_users_display_name ON bot_users(display_name);
+CREATE INDEX IF NOT EXISTS idx_bot_users_agent_name ON bot_users(agent_name);
 """
 
 
