@@ -41,22 +41,27 @@ def start_recording(user_id: UserId = "default") -> str:
 # ── call_agent ──────────────────────────────────────────────
 @tool
 def call_agent(target_name: str, message: str, user_id: UserId = "default") -> str:
-    """向另一个用户的 Agent 发一条消息，由对方 Agent 处理后回复你。target_name 是对方
-    用户的姓名或对方 Agent 的名字（会在全局 bot 用户表 bot_users 里查找，不是查通讯录）。
+    """向另一个用户的 Agent 发一条消息，触发跨 Agent 对话。target_name 是对方用户的姓名
+    或对方 Agent 的名字（在全局 bot 用户表 bot_users 里查找，不是通讯录）。
 
-    **触发场景**：用户说「问危博xxx」/「让危博的助手帮我确认xxx」/「跟危博的Agent说xxx」/
-    「联系一下危博」/「问下小博xxx」/「你现在去找下危博的助手」这种**要跟另一个用户的
-    助手交流**的意图 → 一定用这个工具（本项目没有查通讯录的功能）。
+    **触发场景**：用户说「问危博xxx」/「让危博的助手帮我确认xxx」/「联系一下危博」/
+    「跟危博说xxx」这种要跟另一个用户的助手交流的意图 → 用这个工具（本项目没有查通讯录）。
 
-    行为规则：
-    - 对方 Agent 会**代表对方直接回你**（对方本人稍后也会在微信里看到这轮完整对话）
-    - 如果对方 Agent 的回复没把事情说清、需要**追问才能完成用户交办的事**，你**可以再次调用
-      call_agent 追问**；两个 Agent 间对话有 5 轮硬上限（每次 call_agent 算一轮）
-    - 如果对方回复已经足够了，就把结果综合给用户，不用凑轮数
-    - 对方不在线 / 没设名字找不到，工具返回明确原因，你就如实告诉用户"""
+    工作流程（**通信总线** kernel/bus 保证）：
+    1. 系统向对方微信发一条握手："🔔 有 Agent 交流｜{你的用户}的助手对你说 xxx"
+    2. 对方 Agent 处理这条消息，决定要不要回复
+    3. 如果对方 Agent 想回复，会先请求对方用户授权（对方微信弹"允许/不允许"）
+    4. 对方用户回复"允许"后，对方 Agent 的原话直接发到你的用户微信
+    5. 你**不需要等待**、也**不需要综合**回复——发起后就完事了
+
+    你的用户会先收到系统通知"✅ 已向 XX 发起对话，等应答"。对方 Agent 后续如果回复，
+    会以对方 Agent 名义**直接**发到你的用户微信，跟你无关。
+
+    5 轮上限（每次 call_agent 算一轮）；对方不在线/找不到时工具会返回明确原因。"""
     from app import realtime
     from app.agent import conversation
     from app.agent.runner import VoiceTaskAgent
+    from app.kernel import bus
 
     target_name = (target_name or "").strip()
     message = (message or "").strip()
@@ -82,6 +87,7 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
 
     sender = users.get(user_id)
     sender_display = (sender.display_name if sender and sender.display_name else "某个用户")
+    target_label = target.display_name or target.user_id
 
     # 双方 channel 都推同一条 agent_conversation 事件，两边看板都能看到这一轮
     def _publish_both(payload: dict) -> None:
@@ -93,15 +99,24 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         "direction": "→",
         "from": sender_display,
         "from_user_id": user_id,
-        "to": target.display_name or target.user_id,
+        "to": target_label,
         "to_user_id": target.user_id,
         "text": message,
     })
 
-    # 同步触发目标 Agent 处理
+    # 通过 kernel bus 发送系统级握手消息到 target 微信
+    handshake_ok = bus.deliver_handshake(
+        from_user_id=user_id, from_display=sender_display,
+        to_user_id=target.user_id, message=message,
+    )
+    if not handshake_ok:
+        return (f"[call_agent] 无法把握手信号送达「{target_label}」的微信（对方还没跟自己的 bot 说过话，"
+                f"没有会话通行证 ctx，或 ctx 已过期）。请告诉用户对方目前联系不上。")
+
+    # 触发对方 Agent 处理这条握手消息（内部会调 bus.request_authorization 请求授权）
     try:
         agent = VoiceTaskAgent()
-        reply = agent.handle_agent_message(
+        agent.handle_agent_message(
             target_user_id=target.user_id,
             from_user_id=user_id,
             from_display_name=sender_display,
@@ -110,27 +125,14 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     except Exception as e:  # noqa: BLE001
         return f"[call_agent] 目标 Agent 处理失败：{e}"
 
-    _publish_both({
-        "round": round_num,
-        "direction": "←",
-        "from": target.display_name or target.user_id,
-        "from_user_id": target.user_id,
-        "to": sender_display,
-        "to_user_id": user_id,
-        "text": reply,
-    })
+    # 给发起方（当前用户）微信推一条系统通知："已发起对话"
+    bus.deliver_system_notice(user_id,
+        f"✅ 已向「{target_label}」发起对话。若对方授权回复，回复会自动到你微信。")
+    conversation.mark_reply_pushed()  # 起源 Agent 不用再输出
 
-    # 直接把 B 的原话 push 到 sender 微信；本 Agent 结束后不再转述。
-    from app.channel import dispatch
-    target_label = target.display_name or target.user_id
-    signature = f"{target_label}的助手" + (f" {target.agent_name}" if target.agent_name else "")
-    push_text = f"{signature}：\n{reply}"
-    if dispatch.push_to_user(user_id, push_text):
-        conversation.mark_reply_pushed()
-
-    # 工具结果给 LLM 看的还是有内容的（避免 LLM 因空结果做奇怪反应），
-    # 但真正决定最终不再输出、微信不再重发的开关在 conversation.was_reply_pushed。
-    return f"「{target_label}」的 Agent 回复：\n{reply}\n\n[已直接把这段原话以对方助手名义 push 给用户微信；你无需再向用户重复。]"
+    return (f"[call_agent] 已经通过通信总线向「{target_label}」发起握手。"
+            f"若对方用户批准回复，对方 Agent 的原话会由系统直接推到当前用户微信里，"
+            f"你**不用**再综合、不用再总结。直接结束这一轮即可。")
 
 
 # ── set_my_name ─────────────────────────────────────────────

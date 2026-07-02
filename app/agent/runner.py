@@ -83,6 +83,21 @@ class VoiceTaskAgent:
         conversation.reset()
         conversation.set_origin(user_id)
 
+        # ── 授权响应 hook：如果这个用户有 pending 的授权请求，优先处理
+        # （B 用户在自己 bot 里回复"允许/不允许"时短路，跳过 LLM）
+        from app.kernel import bus as _bus
+        _verdict = _bus.resolve_authorization(user_id, text)
+        if _verdict == "allowed":
+            return Result(transcript=text, used_tool=True,
+                          reply="✅ 已授权。你的回复已发送给对方。")
+        if _verdict == "denied":
+            return Result(transcript=text, used_tool=True,
+                          reply="❌ 已拒绝，本次不发送。对方会收到系统「未应答」提示。")
+        if _verdict == "unclear":
+            return Result(transcript=text, used_tool=True,
+                          reply="没听清是允许还是不允许（我在等你对刚才那条授权请求做选择）。请回复「允许」或「不允许」。")
+        # _verdict is None → 无 pending，正常走后续 LLM 流程
+
         # ── 录制会话拦截（确定性，不依赖 LLM）──
         rec = RecordingStore()
         cleaned = _clean(text)
@@ -332,22 +347,23 @@ class VoiceTaskAgent:
         memory_bridge.save_turn(target_user_id, MessageRole.USER, prefixed)
         memory_bridge.save_turn(target_user_id, MessageRole.ASSISTANT, reply)
 
-        # 主动 push 到 target 本人的微信，让他知道有人在跟他 Agent 交流 + Agent 已代答什么
-        notify = (
-            f"🔔 有 Agent 交流\n"
-            f"「{from_display_name}的助手」对你说：\n{message}\n\n"
-            f"我已代你回复：\n{reply}\n\n"
-            f"（如果不合适或想补充，直接告诉我，我会重新联系对方）"
-        )
-        try:
-            pushed = dispatch.push_to_user(target_user_id, notify)
-            if not pushed:
-                # push 失败也不阻断跨 Agent 对话；只在看板留个 system_event 让 target 打开面板能看到
+        # ⚠️ 关键：不直接把 reply 发给 sender —— 改走 kernel bus 请求 target 用户授权。
+        # target 微信会收到"我想给 A 发送 xxx，回复允许/不允许"。
+        # 只有 target 回复"允许"后系统才会把 reply 送到 A 微信（deliver_with_token）。
+        if reply and reply.strip():
+            from app.kernel import bus
+            asked = bus.request_authorization(
+                agent_user_id=target_user_id,
+                agent_display=target_display,
+                target_user_id=from_user_id,
+                target_display=from_display_name,
+                proposed_text=reply.strip(),
+                conv_round=conversation.get_round(),
+            )
+            if not asked:
+                # target 也没 ctx，授权流走不下去 → 只在看板留下痕迹，主流程不阻断
                 _realtime.publish(target_user_id, "system_event",
-                                  {"text": "有 Agent 消息到达，但无法 push 到你微信（可能你没跟 bot 说过话或 ctx 过期）。上面事件流就是完整交流。"})
-        except Exception as e:  # noqa: BLE001
-            import logging as _log
-            _log.getLogger(__name__).warning("push target 失败: %s", e)
+                                  {"text": "有 Agent 消息到达且已回复，但无法向你请求授权（你还没跟 bot 说过话）。请先给 bot 发一句话激活 ctx。"})
 
         return reply
 
