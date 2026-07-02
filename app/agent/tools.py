@@ -9,6 +9,7 @@ from typing import Annotated
 
 from langchain_core.tools import InjectedToolArg, tool
 
+from app import config
 from app.agent import summarizer
 from app.core.memory.bot_users import BotUsersStore
 from app.core.memory.recording import RecordingStore
@@ -159,9 +160,61 @@ def set_agent_name(name: str, user_id: UserId = "default") -> str:
     return f"🤖 好的，我叫「{name}」。之后我跟别人的 Agent 沟通会自称这个名字。"
 
 
+# ── web_search ──────────────────────────────────────────────
+@tool
+def web_search(query: str, user_id: UserId = "default") -> str:
+    """通过 Tavily 联网搜索获取**最新事实**。仅在以下场景才用，其他一律不调：
+    - 用户问的是**时效性事实**：当前价格、汇率、新闻、比赛结果、天气、股市、刚发生的事件
+    - 用户明确说"查一下 / 搜一下 / 帮我查"
+    - 你自己知识库里没有的**具体信息**（比如某个新产品的规格）
+
+    **绝对不用**的场景：
+    - 日常聊天、寒暄、情感交流
+    - 用户让你**记录 / 记一下**（用 structure_task / start_recording）
+    - 用户让你**联系某人**（用 call_agent）
+    - 通用建议 / 创意 / 头脑风暴（你自己就能答）
+    - 数学计算 / 已知常识（哪年出生、地理常识等）
+
+    query 用简短的中文关键词，别加"请问"、"帮我查一下"等前缀。"""
+    query = (query or "").strip()
+    if not query:
+        return "[web_search] 缺少查询词"
+    if not config.TAVILY_API_KEY:
+        return "[web_search] 服务端未配置 TAVILY_API_KEY，无法联网搜索。"
+    try:
+        from langchain_tavily import TavilySearch
+        searcher = TavilySearch(
+            tavily_api_key=config.TAVILY_API_KEY,
+            max_results=5,
+            search_depth="basic",
+            include_answer="basic",
+        )
+        result = searcher.invoke({"query": query})
+    except Exception as e:  # noqa: BLE001
+        return f"[web_search] 搜索失败：{e}"
+
+    # 格式化（简洁，避免噪音）
+    answer = (result.get("answer") or "").strip()
+    items = result.get("results") or []
+    lines = [f"🔍 搜索：{query}"]
+    if answer:
+        lines.append(f"\n**摘要**：{answer}")
+    if items:
+        lines.append("\n**结果**：")
+        for i, r in enumerate(items[:5], 1):
+            title = (r.get("title") or "").strip()
+            content = (r.get("content") or "").strip().replace("\n", " ")[:220]
+            url = (r.get("url") or "").strip()
+            lines.append(f"{i}. **{title}**\n   {content}\n   {url}")
+    if not answer and not items:
+        return f"🔍 搜索「{query}」没找到结果。"
+    return "\n".join(lines)
+
+
 # 所有工具（runner 直接 bind_tools(TOOLS)）
 TOOLS = [
     structure_task, start_recording,
     set_my_name, set_agent_name, call_agent,
+    web_search,
 ]
 BY_NAME = {t.name: t for t in TOOLS}

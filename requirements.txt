@@ -15,3 +15,5 @@ uvicorn>=0.29
 pusher>=3.3
 # Agent-to-Agent 协议 SDK（Google 官方，含 FastAPI 集成）
 a2a-sdk[http-server]>=1.1
+# Web 搜索（Tavily：LangChain 官方集成，专为 LLM 优化）
+langchain-tavily>=0.2

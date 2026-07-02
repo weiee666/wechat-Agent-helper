@@ -67,3 +67,6 @@ def pusher_ready() -> bool:
 A2A_BASE_URL = os.getenv("A2A_BASE_URL", "").strip()
 # 服务方名字（放进 Agent Card 的 provider）
 A2A_PROVIDER_NAME = os.getenv("A2A_PROVIDER_NAME", "weixin-agent").strip()
+
+# ── Web 搜索（Tavily）─────────────────────────────────────
+TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "").strip()
