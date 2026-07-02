@@ -128,8 +128,18 @@ class VoiceTaskAgent:
             token = dashboard_tokens.issue(user_id)
             sep = "&" if "?" in config.DASHBOARD_URL_BASE else "?"
             url = f"{config.DASHBOARD_URL_BASE}{sep}token={token}&user_id={user_id}"
-            return Result(transcript=text, used_tool=True,
-                          reply=f"🔭 旁观面板（1 小时内有效）：\n{url}")
+            reply = f"🔭 旁观面板（1 小时内有效）：\n{url}"
+            # 看板是跨 Agent 对话的入口。用户身份没完善的话，跨 Agent 通信没法进行——顺手提示补上
+            me = BotUsersStore().get(user_id)
+            hints = []
+            if not (me and me.display_name):
+                hints.append("• 说「我叫XXX」记下你的名字")
+            if not (me and me.agent_name):
+                hints.append("• 说「给你起名叫XXX」给我起个名")
+            if hints:
+                reply += ("\n\n💡 顺便：设完这两项，别人的 Agent 就能用你的名字找到你，"
+                          "我们才能相互沟通：\n" + "\n".join(hints))
+            return Result(transcript=text, used_tool=True, reply=reply)
 
         verbose = UserSettingsStore().get_verbose(user_id)
 
