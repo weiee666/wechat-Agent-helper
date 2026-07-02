@@ -42,6 +42,26 @@ _DASHBOARD_TRIGGERS = {"看板", "打开看板", "旁观面板", "面板", "dash
 _START_MSG = "🎙️ 开始记录，你尽管说，我先攒着不打断；说完发一句『就这些』我来整理。"
 
 
+def _push_profile_hint_if_needed(user_id: str) -> bool:
+    """检测姓名/Agent 名是否设，缺就用 dispatch 单独 push 一条提示（不污染主 reply）。
+    返回 True 表示推送了；False 表示不需要推。"""
+    me = BotUsersStore().get(user_id)
+    hints = []
+    if not (me and me.display_name):
+        hints.append("• 说「我叫XXX」记下你的名字")
+    if not (me and me.agent_name):
+        hints.append("• 说「给你起名叫XXX」给我起个名")
+    if not hints:
+        return False
+    text = ("💡 顺便：设完这两项，别人的 Agent 就能用你的名字找到你，"
+            "我们才能相互沟通：\n" + "\n".join(hints))
+    try:
+        from app.channel import dispatch
+        return dispatch.push_to_user(user_id, text)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def _clean(text: str) -> str:
     """去掉标点/空白，便于匹配触发语（语音转写常带句号）。"""
     return re.sub(r"[\s，。、！？!?.,；;：:~～]+", "", text or "")
@@ -138,18 +158,10 @@ class VoiceTaskAgent:
             token = dashboard_tokens.issue(user_id)
             sep = "&" if "?" in config.DASHBOARD_URL_BASE else "?"
             url = f"{config.DASHBOARD_URL_BASE}{sep}token={token}&user_id={user_id}"
-            reply = f"🔭 旁观面板（1 小时内有效）：\n{url}"
-            # 看板是跨 Agent 对话的入口。用户身份没完善的话，跨 Agent 通信没法进行——顺手提示补上
-            me = BotUsersStore().get(user_id)
-            hints = []
-            if not (me and me.display_name):
-                hints.append("• 说「我叫XXX」记下你的名字")
-            if not (me and me.agent_name):
-                hints.append("• 说「给你起名叫XXX」给我起个名")
-            if hints:
-                reply += ("\n\n💡 顺便：设完这两项，别人的 Agent 就能用你的名字找到你，"
-                          "我们才能相互沟通：\n" + "\n".join(hints))
-            return Result(transcript=text, used_tool=True, reply=reply)
+            # 姓名/Agent 名字缺失时，走独立 push（不塞进本条 reply 里）
+            _push_profile_hint_if_needed(user_id)
+            return Result(transcript=text, used_tool=True,
+                          reply=f"🔭 旁观面板（1 小时内有效）：\n{url}")
 
         verbose = UserSettingsStore().get_verbose(user_id)
 
@@ -223,19 +235,9 @@ class VoiceTaskAgent:
         else:
             reply = reply or "（处理步骤较多，已先停下。你可以补充或换个说法。）"
 
-        # 主动提醒：还没设"自己的名字 / Agent 名字"→ 别人的 Agent 找不到你 → 无法跨 Agent 对话
-        me = BotUsersStore().get(user_id)
-        need_name = not (me and me.display_name)
-        need_agent_name = not (me and me.agent_name)
-        if is_first_contact and (need_name or need_agent_name):
-            hints = []
-            if need_name:
-                hints.append("• 告诉我你叫什么：说「我叫XXX」")
-            if need_agent_name:
-                hints.append("• 给我这个助手起个名字：说「给你起名叫XXX」")
-            profile_guide = ("💡 顺便：设完这些之后，别人的 Agent 就能用你的名字找到你，"
-                             "我们就能相互沟通了：\n" + "\n".join(hints))
-            reply = (reply + "\n\n" + profile_guide) if reply.strip() else profile_guide
+        # 首次接触且姓名字段没设 → 独立 push 一条提示（不污染主 reply）
+        if is_first_contact:
+            _push_profile_hint_if_needed(user_id)
 
         # 更新最后活跃时间
         try:
