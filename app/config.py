@@ -47,18 +47,6 @@ ILINK_QR_WEB_PORT = int(os.getenv("ILINK_QR_WEB_PORT", "8765"))  # --qr-web 登�
 # ── 自助开通门户 API ────────────────────────────────────────
 API_PORT = int(os.getenv("API_PORT", "8080"))
 
-# ── Google Drive 员工通讯录同步 ─────────────────────────────
-GDRIVE_KEY_FILE = os.getenv("GDRIVE_KEY_FILE", str(BASE_DIR / "secrets" / "gdrive-key.json"))
-GDRIVE_FOLDER_ID = os.getenv("GDRIVE_FOLDER_ID", "")          # 指定的共享文件夹/硬盘 ID
-GDRIVE_SYNC_MINUTES = int(os.getenv("GDRIVE_SYNC_MINUTES", "30"))  # 定时同步间隔（仅能连Google的机器用）
-# 推送通讯录到服务器的共享令牌（服务器在国内连不上Google，改由能连的机器拉表后推送）
-DIRECTORY_SYNC_TOKEN = os.getenv("DIRECTORY_SYNC_TOKEN", "")
-
-
-def gdrive_ready() -> bool:
-    from pathlib import Path as _P
-    return bool(GDRIVE_FOLDER_ID and _P(GDRIVE_KEY_FILE).exists())
-
 
 # ── 实时旁观面板（Pusher）──────────────────────────────────
 PUSHER_APP_ID = os.getenv("PUSHER_APP_ID", "").strip()

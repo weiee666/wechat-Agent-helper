@@ -11,8 +11,5 @@ qrcode>=7.4
 # 自助开通 API
 fastapi>=0.110
 uvicorn>=0.29
-# 通讯录表格解析 + 中英文名拼音匹配
-openpyxl>=3.1
-pypinyin>=0.50
 # 实时旁观面板（Pusher pub/sub）
 pusher>=3.3

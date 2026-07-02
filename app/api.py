@@ -10,12 +10,11 @@
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, Header, Request
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import config, dashboard_tokens, manager, onboard, realtime
-from app.core.memory.directory import EmployeeDirectory
 
 app = FastAPI(title="weixin-agent onboarding + dashboard")
 
@@ -45,39 +44,6 @@ def connect_status(ticket: str):
     if s is None:
         return JSONResponse({"status": "unknown"}, status_code=404)
     return s
-
-
-@app.post("/directory/sync")
-async def directory_sync(request: Request, x_sync_token: str = Header(default="")):
-    """接收已解析好的通讯录条目（JSON），整表替换。"""
-    if not config.DIRECTORY_SYNC_TOKEN or x_sync_token != config.DIRECTORY_SYNC_TOKEN:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    body = await request.json()
-    n = EmployeeDirectory().replace_all(body.get("entries") or [])
-    return {"ok": True, "count": n}
-
-
-@app.post("/directory/upload")
-async def directory_upload(request: Request, x_sync_token: str = Header(default=""),
-                           x_filename: str = Header(default="")):
-    """接收上传的通讯录文件原始字节（CSV/xlsx），服务器解析后整表替换。
-
-    带 header  X-Sync-Token（校验）和 X-Filename（判断格式，可空）。
-    """
-    if not config.DIRECTORY_SYNC_TOKEN or x_sync_token != config.DIRECTORY_SYNC_TOKEN:
-        return JSONResponse({"error": "unauthorized"}, status_code=401)
-    content = await request.body()
-    if not content:
-        return JSONResponse({"error": "空文件"}, status_code=400)
-    from app.core.table_parse import parse_table
-    try:
-        entries = parse_table(content, x_filename)
-    except Exception as e:  # noqa: BLE001
-        return JSONResponse({"error": f"解析失败：{e}"}, status_code=400)
-    if not entries:
-        return JSONResponse({"error": "没解析出任何含邮箱的行，检查下表头/内容"}, status_code=400)
-    n = EmployeeDirectory().replace_all(entries)
-    return {"ok": True, "count": n}
 
 
 # ── 旁观面板 API ────────────────────────────────────────────

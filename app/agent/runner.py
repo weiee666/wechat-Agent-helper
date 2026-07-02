@@ -26,11 +26,6 @@ from app.models.schemas import Message
 
 _MAX_TOOL_ITERS = 5  # 工具调用循环最多轮数（防止失控）
 
-
-def _email_setup_guide() -> str:
-    """发件邮箱设置引导（固定模板，可编辑 prompts/email_setup_guide.txt）。"""
-    return (config.PROMPT_DIR / "email_setup_guide.txt").read_text(encoding="utf-8").strip()
-
 # 录制开始/结束/取消触发语（消息去标点后匹配，避免中途误触发）。
 # 开始触发用正则，兼容"我想记录一下/开始记录/我要记一段"等口述变体。
 _START_RE = re.compile(r"^(我)?(想|要|来|想要)?(开始)?(记录|记|口述)(一下|一段|个东西)?(吧|哈|呗|啊)?$")
@@ -212,11 +207,6 @@ class VoiceTaskAgent:
                 messages.append(ToolMessage(content=out, tool_call_id=tc["id"]))  # 结果回填
         else:
             reply = reply or "（处理步骤较多，已先停下。你可以补充或换个说法。）"
-
-        # 主动提醒：新用户首次说话、且还没设发件邮箱 → 在回复后补上设置引导（不只一问一答）
-        if is_first_contact and UserSettingsStore().get_smtp(user_id) is None:
-            guide = "💡 顺便：你还没设发任务邮件用的发件邮箱。\n\n" + _email_setup_guide()
-            reply = (reply + "\n\n" + guide) if reply.strip() else guide
 
         # 主动提醒：还没设"自己的名字 / Agent 名字"→ 别人的 Agent 找不到你 → 无法跨 Agent 对话
         me = BotUsersStore().get(user_id)

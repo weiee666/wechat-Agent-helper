@@ -30,10 +30,13 @@ def main() -> None:
     for aid in manager.list_running():
         print(f"   • {aid}")
 
-    # 公司通讯录：本服务器在国内连不上 Google，不自己拉表。
-    # 改由能连 Google 的机器（Mac / Vercel）拉表后 POST /directory/sync 推送进来。
-    from app.core.memory.directory import EmployeeDirectory
-    print(f"📒 公司通讯录现有 {EmployeeDirectory().count()} 人（经外部推送更新）")
+    # 打印当前 bot 用户注册状况
+    from app.core.memory.bot_users import BotUsersStore
+    users = BotUsersStore().list_all()
+    running = [u for u in users if u.status == "running"]
+    print(f"👥 bot 用户注册表：共 {len(users)} 人，running {len(running)}")
+    for u in running:
+        print(f"   • {u.display_name or '(未设名)'} / Agent={u.agent_name or '(未设)'} <{u.user_id}>")
 
     import uvicorn  # 延迟导入
 
