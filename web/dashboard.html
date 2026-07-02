@@ -7,23 +7,20 @@
 <script src="https://js.pusher.com/8.2/pusher.min.js"></script>
 <style>
   :root {
-    --bg-chat: #f5f5f5;
+    --bg-chat: #ededed;
     --bg-side: #f0efee;
     --bg-side-active: #cfcecd;
     --bg-side-hover: #dedddc;
-    --bg-card: #ffffff;
-    --user-bg: #e3f2fd;
-    --reply-bg: #e8f5e9;
-    --thinking-bg: #fff9c4;
-    --tool-call-bg: #ffe0b2;
-    --tool-out-bg: #f8bbd0;
-    --system-bg: #eeeeee;
+    --bg-header: #f5f5f5;
+    --bubble-me: #95ec69;       /* 微信右侧绿气泡 */
+    --bubble-other: #ffffff;    /* 左侧白气泡 */
+    --bubble-system: rgba(0,0,0,0.08);
     --text: #1c1c1e;
+    --text-inv: #1c1c1e;
     --muted: #86868b;
-    --border: #d2d2d7;
-    --pair-outgoing-bg: #e1f5fe;
-    --pair-incoming-bg: #e8f5e9;
+    --border: #d6d6d6;
     --sidebar-w: 260px;
+    --avatar-size: 34px;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
@@ -56,13 +53,11 @@
     font-size: 14px;
     font-weight: 600;
     margin: 0 0 6px 0;
-    color: var(--text);
   }
   .sidebar-header .who {
     font-size: 12px;
     color: var(--muted);
     word-break: break-all;
-    max-width: 100%;
   }
   #status {
     display: inline-block;
@@ -75,17 +70,7 @@
   }
   #status.connected { background: #d4edda; color: #155724; }
   #status.error { background: #f8d7da; color: #721c24; }
-  .conv-list {
-    flex: 1;
-    overflow-y: auto;
-  }
-  .conv-section-title {
-    font-size: 11px;
-    color: var(--muted);
-    padding: 12px 16px 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
+  .conv-list { flex: 1; overflow-y: auto; }
   .conv-item {
     display: flex;
     align-items: center;
@@ -98,48 +83,28 @@
   .conv-item:hover { background: var(--bg-side-hover); }
   .conv-item.active { background: var(--bg-side-active); }
   .conv-item .avatar {
-    width: 36px;
-    height: 36px;
+    width: 36px; height: 36px;
     border-radius: 6px;
     background: #fff;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 18px;
-    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; flex-shrink: 0;
   }
-  .conv-item .info {
-    flex: 1;
-    min-width: 0;
-  }
+  .conv-item .info { flex: 1; min-width: 0; }
   .conv-item .name {
-    font-size: 14px;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: var(--text);
+    font-size: 14px; font-weight: 500;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .conv-item .preview {
-    font-size: 12px;
-    color: var(--muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    font-size: 12px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     margin-top: 2px;
   }
   .conv-item .unread {
-    background: #ff4d4f;
-    color: white;
-    font-size: 11px;
-    font-weight: 600;
-    min-width: 18px;
-    height: 18px;
-    padding: 0 6px;
+    background: #ff4d4f; color: white;
+    font-size: 11px; font-weight: 600;
+    min-width: 18px; height: 18px; padding: 0 6px;
     border-radius: 9px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    display: flex; align-items: center; justify-content: center;
   }
   /* ── 右侧栏 ─────────────────────────── */
   .chat-area {
@@ -150,30 +115,25 @@
     min-width: 0;
   }
   .chat-header {
-    padding: 12px 20px;
-    background: var(--bg-card);
+    padding: 14px 20px;
+    background: var(--bg-header);
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
     justify-content: space-between;
     flex-shrink: 0;
   }
-  .chat-header .title {
-    font-size: 15px;
-    font-weight: 600;
-  }
+  .chat-header .title { font-size: 15px; font-weight: 600; }
   .chat-header .subtitle {
-    font-size: 12px;
-    color: var(--muted);
-    margin-top: 2px;
+    font-size: 12px; color: var(--muted); margin-top: 2px;
   }
   .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 20px;
+    padding: 16px 20px;
   }
   .chat-messages-inner {
-    max-width: 800px;
+    max-width: 720px;
     margin: 0 auto;
   }
   .empty-state {
@@ -187,58 +147,143 @@
     text-align: center;
   }
   .empty-state .icon { font-size: 40px; margin-bottom: 12px; }
-  .divider {
-    text-align: center;
-    color: var(--muted);
-    font-size: 11px;
-    margin: 20px 0 10px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-  }
-  .event {
-    background: var(--bg-card);
-    border-radius: 12px;
-    padding: 10px 14px;
-    margin-bottom: 8px;
-    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+
+  /* ── 气泡 ─────────────────────────── */
+  .msg {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 14px;
     animation: fadeIn 0.2s ease-out;
   }
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(6px); }
-    to { opacity: 1; transform: translateY(0); }
+  .msg.me {
+    flex-direction: row-reverse;
+    animation: fadeInRight 0.2s ease-out;
   }
-  .event .type {
-    font-size: 11px;
-    color: var(--muted);
-    font-weight: 500;
-    margin-bottom: 4px;
-    display: flex;
-    justify-content: space-between;
+  .msg.other { animation: fadeInLeft 0.2s ease-out; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeInRight { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes fadeInLeft { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
+  .msg .avatar {
+    width: var(--avatar-size); height: var(--avatar-size);
+    border-radius: 4px;
+    background: var(--bubble-other);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+    border: 1px solid rgba(0,0,0,0.05);
   }
-  .event .content {
+  .msg.me .avatar { background: #eee; }
+  .msg .body { max-width: 70%; }
+  .msg.me .body { display: flex; flex-direction: column; align-items: flex-end; }
+  .msg.other .body { display: flex; flex-direction: column; align-items: flex-start; }
+  .msg .who-line {
+    font-size: 11px; color: var(--muted);
+    margin-bottom: 3px;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .msg .who-line .time { color: var(--muted); }
+  .msg .bubble {
+    background: var(--bubble-other);
+    color: var(--text);
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 14px;
+    line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
-    font-size: 14px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    position: relative;
   }
-  .event.user_message { background: var(--user-bg); }
-  .event.assistant_reply { background: var(--reply-bg); }
-  .event.verbose_thinking { background: var(--thinking-bg); }
-  .event.verbose_tool_call { background: var(--tool-call-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
-  .event.verbose_tool_out { background: var(--tool-out-bg); font-family: "SF Mono", Menlo, monospace; font-size: 13px; }
-  .event.system { background: var(--system-bg); color: var(--muted); font-size: 12px; }
-  .event.agent_conversation.outgoing { background: var(--pair-outgoing-bg); border-left: 4px solid #29b6f6; }
-  .event.agent_conversation.incoming { background: var(--pair-incoming-bg); border-left: 4px solid #66bb6a; }
-  .event.agent_conversation .peers {
+  .msg.me .bubble {
+    background: var(--bubble-me);
+  }
+  /* 气泡尖角（可选，简化实现） */
+  .msg.other .bubble::before {
+    content: "";
+    position: absolute;
+    left: -6px; top: 12px;
+    width: 0; height: 0;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-right: 6px solid var(--bubble-other);
+  }
+  .msg.me .bubble::after {
+    content: "";
+    position: absolute;
+    right: -6px; top: 12px;
+    width: 0; height: 0;
+    border-top: 6px solid transparent;
+    border-bottom: 6px solid transparent;
+    border-left: 6px solid var(--bubble-me);
+  }
+
+  /* 折叠的思考详情 */
+  .details-toggle {
+    font-size: 11px;
+    color: var(--muted);
+    background: rgba(0,0,0,0.04);
+    padding: 3px 8px;
+    border-radius: 10px;
+    cursor: pointer;
+    user-select: none;
+    margin-top: 4px;
+    display: inline-block;
+    transition: background 0.15s;
+  }
+  .details-toggle:hover { background: rgba(0,0,0,0.08); }
+  .details-panel {
+    display: none;
+    margin-top: 6px;
+    background: rgba(0,0,0,0.03);
+    border-radius: 6px;
+    padding: 8px 10px;
+    max-width: 100%;
+  }
+  .details-panel.expanded { display: block; }
+  .detail-item {
     font-size: 12px;
-    color: #5e35b1;
-    font-weight: 600;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
+    padding-left: 0;
   }
+  .detail-item:last-child { margin-bottom: 0; }
+  .detail-item .tag {
+    display: inline-block;
+    font-weight: 600;
+    color: var(--muted);
+    margin-right: 4px;
+  }
+  .detail-item.thinking .tag { color: #f57f17; }
+  .detail-item.tool_call .tag { color: #d84315; font-family: "SF Mono", Menlo, monospace; }
+  .detail-item.tool_out .tag { color: #ad1457; font-family: "SF Mono", Menlo, monospace; }
+  .detail-item .value {
+    color: #333;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .detail-item.tool_call .value, .detail-item.tool_out .value {
+    font-family: "SF Mono", Menlo, monospace;
+    font-size: 11px;
+  }
+
+  /* 系统消息（居中）*/
+  .msg.system {
+    justify-content: center;
+    animation: fadeIn 0.2s ease-out;
+  }
+  .msg.system .bubble {
+    background: var(--bubble-system);
+    color: var(--muted);
+    font-size: 12px;
+    max-width: 80%;
+    text-align: center;
+    box-shadow: none;
+  }
+  .msg.system .bubble::before, .msg.system .bubble::after { display: none; }
+
   #banner {
     position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    top: 50%; left: 50%; transform: translate(-50%, -50%);
     max-width: 500px;
     padding: 24px 28px;
     background: #fff3cd;
@@ -289,106 +334,45 @@ const userId = params.get('user_id');
 
 const API = '/api/dashboard';
 
-// ── 会话数据结构 ──
-// 每个会话：{ id, name, icon, events: [{ type, data, time }], unread }
+// ── 会话：每个 conv 存 items: [{kind, ...}] ──
+// item.kind ∈ 'user' | 'assistant' | 'system' | 'agent_out' | 'agent_in'
+// assistant 类型的 item 有 .details: [{type, text}] 存该次 reply 前的思考/工具事件
 const conversations = {
   self: {
     id: 'self',
     name: '我和助手',
     icon: '🤖',
-    events: [],
+    items: [],
     unread: 0,
     isPair: false,
+    _pendingDetails: [],  // 累积到下一个 assistant 的 details
   },
-  // pair-{otherUid}: 动态添加
 };
 let currentConvId = 'self';
-let myAgentName = ''; // 从 config / 后续消息里学到
 
-// ── 工具方法 ──
-function setStatus(text, cls) {
-  $status.textContent = text;
-  $status.className = cls || '';
-}
-
+function setStatus(text, cls) { $status.textContent = text; $status.className = cls || ''; }
 function showBanner(msg) {
-  const div = document.createElement('div');
-  div.id = 'banner';
-  div.innerHTML = msg;
+  const div = document.createElement('div'); div.id = 'banner'; div.innerHTML = msg;
   document.body.appendChild(div);
 }
-
-const TYPE_LABEL = {
-  user: '👤 用户',
-  user_message: '👤 用户',
-  assistant: '🤖 助手',
-  assistant_reply: '🤖 助手',
-  system: 'ℹ️ 系统',
-  verbose_thinking: '💭 思考',
-  verbose_tool_call: '🔧 工具调用',
-  verbose_tool_out: '↩️ 工具结果',
-};
-
 function formatTime(ts) {
   const d = ts ? new Date(ts) : new Date();
   return d.toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-function makeEventEl(evt) {
-  const div = document.createElement('div');
-  if (evt.type === 'agent_conversation') {
-    const isMineOutgoing = evt.data.from_user_id === userId;
-    div.className = 'event agent_conversation ' + (isMineOutgoing ? 'outgoing' : 'incoming');
-    const peers = document.createElement('div');
-    peers.className = 'peers';
-    const arrow = evt.data.direction || '→';
-    peers.textContent = `🔀 第 ${evt.data.round || '?'} 轮 · ${evt.data.from} ${arrow} ${evt.data.to}`;
-    const contentEl = document.createElement('div');
-    contentEl.className = 'content';
-    contentEl.textContent = evt.data.text || '';
-    const time = document.createElement('div');
-    time.className = 'type';
-    time.style.marginTop = '4px';
-    time.style.marginBottom = '0';
-    const label = document.createElement('span');
-    label.textContent = isMineOutgoing ? '我方助手发出' : '收到对方助手';
-    const timeSpan = document.createElement('span');
-    timeSpan.textContent = formatTime(evt.time);
-    time.appendChild(label); time.appendChild(timeSpan);
-    div.appendChild(peers); div.appendChild(contentEl); div.appendChild(time);
-    return div;
-  }
-  div.className = 'event ' + evt.type;
-  const typeEl = document.createElement('div');
-  typeEl.className = 'type';
-  const label = document.createElement('span');
-  label.textContent = TYPE_LABEL[evt.type] || evt.type;
-  const time = document.createElement('span');
-  time.textContent = evt.historical ? '' : formatTime(evt.time);
-  typeEl.appendChild(label); typeEl.appendChild(time);
-  const contentEl = document.createElement('div');
-  contentEl.className = 'content';
-  contentEl.textContent = evt.content || '';
-  div.appendChild(typeEl); div.appendChild(contentEl);
-  return div;
-}
-
-// ── 侧栏渲染 ──
+// ── 侧栏 ──
 function renderSidebar() {
   $convList.innerHTML = '';
   const selfConv = conversations.self;
   const pairs = Object.values(conversations).filter(c => c.isPair);
-
   const items = [selfConv, ...pairs];
   for (const conv of items) {
-    const item = document.createElement('div');
-    item.className = 'conv-item' + (conv.id === currentConvId ? ' active' : '');
-    item.onclick = () => selectConversation(conv.id);
-
+    const el = document.createElement('div');
+    el.className = 'conv-item' + (conv.id === currentConvId ? ' active' : '');
+    el.onclick = () => selectConversation(conv.id);
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
     avatar.textContent = conv.icon;
-
     const info = document.createElement('div');
     info.className = 'info';
     const name = document.createElement('div');
@@ -396,31 +380,98 @@ function renderSidebar() {
     name.textContent = conv.name;
     const preview = document.createElement('div');
     preview.className = 'preview';
-    preview.textContent = conv.events.length
-      ? previewText(conv.events[conv.events.length - 1])
+    preview.textContent = conv.items.length
+      ? (conv.items[conv.items.length - 1].text || '').slice(0, 30)
       : (conv.isPair ? '暂无对话' : '等待开始…');
     info.appendChild(name); info.appendChild(preview);
-
-    item.appendChild(avatar); item.appendChild(info);
+    el.appendChild(avatar); el.appendChild(info);
     if (conv.unread > 0 && conv.id !== currentConvId) {
       const badge = document.createElement('span');
       badge.className = 'unread';
       badge.textContent = conv.unread > 99 ? '99+' : conv.unread;
-      item.appendChild(badge);
+      el.appendChild(badge);
     }
-    $convList.appendChild(item);
+    $convList.appendChild(el);
   }
 }
 
-function previewText(evt) {
-  if (evt.type === 'agent_conversation') {
-    return (evt.data.text || '').slice(0, 40);
+// ── 消息渲染 ──
+function makeBubble(item) {
+  // item: { kind, text, time, ...extra }
+  const wrap = document.createElement('div');
+  const isMe = (item.kind === 'user') || (item.kind === 'agent_out');
+  const isSys = item.kind === 'system';
+  wrap.className = 'msg ' + (isSys ? 'system' : (isMe ? 'me' : 'other'));
+
+  if (!isSys) {
+    const avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = ({
+      user: '👤', assistant: '🤖', agent_out: '🤖', agent_in: '🔀',
+    })[item.kind] || '·';
+    wrap.appendChild(avatar);
   }
-  const t = TYPE_LABEL[evt.type] || '';
-  return `${t.replace(/[👤🤖💭🔧↩️ℹ️]/g, '').trim()} ${(evt.content || '').slice(0, 30)}`;
+
+  const body = document.createElement('div');
+  body.className = 'body';
+
+  if (!isSys) {
+    const line = document.createElement('div');
+    line.className = 'who-line';
+    line.textContent = ({
+      user: '我', assistant: item.agentName || '助手',
+      agent_out: item.agentName || '我的助手',
+      agent_in: item.agentName || '对方助手',
+    })[item.kind];
+    const time = document.createElement('span');
+    time.className = 'time';
+    time.textContent = ' · ' + formatTime(item.time);
+    line.appendChild(time);
+    body.appendChild(line);
+  }
+
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble';
+  bubble.textContent = item.text || '';
+  body.appendChild(bubble);
+
+  // Agent reply 前的思考/工具调用 → 折叠详情
+  if (item.kind === 'assistant' && item.details && item.details.length) {
+    const toggle = document.createElement('span');
+    toggle.className = 'details-toggle';
+    toggle.textContent = `▲ 展开思考过程（${item.details.length}）`;
+    const panel = document.createElement('div');
+    panel.className = 'details-panel';
+    for (const d of item.details) {
+      const di = document.createElement('div');
+      di.className = 'detail-item ' + d.type;
+      const tag = document.createElement('span');
+      tag.className = 'tag';
+      tag.textContent = ({
+        thinking: '💭 思考',
+        tool_call: '🔧 调用',
+        tool_out: '↩️ 结果',
+      })[d.type] || d.type;
+      const val = document.createElement('span');
+      val.className = 'value';
+      val.textContent = d.text || '';
+      di.appendChild(tag); di.appendChild(val);
+      panel.appendChild(di);
+    }
+    toggle.onclick = () => {
+      panel.classList.toggle('expanded');
+      toggle.textContent = panel.classList.contains('expanded')
+        ? `▼ 收起思考过程（${item.details.length}）`
+        : `▲ 展开思考过程（${item.details.length}）`;
+    };
+    body.appendChild(toggle);
+    body.appendChild(panel);
+  }
+
+  wrap.appendChild(body);
+  return wrap;
 }
 
-// ── 右侧消息区 ──
 function renderChatArea() {
   const conv = conversations[currentConvId];
   if (!conv) {
@@ -431,10 +482,10 @@ function renderChatArea() {
   }
   $chatTitle.textContent = conv.name;
   $chatSubtitle.textContent = conv.isPair
-    ? '跨 Agent 对话（对方助手需要在自己微信里授权后才会回复）'
+    ? '跨 Agent 对话（默认不打扰双方微信，只在此显示）'
     : `观察对象：${userId}`;
   $chatInner.innerHTML = '';
-  if (conv.events.length === 0) {
+  if (conv.items.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
     empty.innerHTML = conv.isPair
@@ -443,8 +494,8 @@ function renderChatArea() {
     $chatInner.appendChild(empty);
     return;
   }
-  for (const evt of conv.events) {
-    $chatInner.appendChild(makeEventEl(evt));
+  for (const item of conv.items) {
+    $chatInner.appendChild(makeBubble(item));
   }
   requestAnimationFrame(() => {
     $chatMessages.scrollTop = $chatMessages.scrollHeight;
@@ -459,22 +510,19 @@ function selectConversation(convId) {
 }
 
 // ── 事件路由 ──
-function pushEvent(convId, evt) {
+function appendItemToConv(convId, item) {
   const conv = conversations[convId];
   if (!conv) return;
-  conv.events.push(evt);
+  conv.items.push(item);
   if (convId === currentConvId) {
-    // 当前会话：追加渲染
-    if (conv.events.length === 1) {
-      // 从空态过渡到有事件
+    if (conv.items.length === 1) {
       renderChatArea();
     } else {
-      $chatInner.appendChild(makeEventEl(evt));
+      $chatInner.appendChild(makeBubble(item));
       requestAnimationFrame(() => {
         $chatMessages.scrollTop = $chatMessages.scrollHeight;
       });
     }
-    // 顺便刷新 sidebar 的 preview
     renderSidebar();
   } else {
     conv.unread = (conv.unread || 0) + 1;
@@ -482,44 +530,67 @@ function pushEvent(convId, evt) {
   }
 }
 
-function routeAgentConversation(data) {
+// 收到 user_message
+function handleUser(text) {
+  conversations.self._pendingDetails = [];  // 新一轮开始
+  appendItemToConv('self', { kind: 'user', text, time: Date.now() });
+}
+
+// 收到 verbose 事件（思考/工具）
+function handleVerbose(type, text) {
+  // 累积到 self 会话的 _pendingDetails，等下一个 assistant_reply 挂上
+  conversations.self._pendingDetails.push({ type, text });
+}
+
+// 收到 assistant_reply
+function handleAssistant(text) {
+  const details = conversations.self._pendingDetails;
+  conversations.self._pendingDetails = [];
+  appendItemToConv('self', {
+    kind: 'assistant', text, time: Date.now(),
+    details: details.slice(),
+  });
+}
+
+// 收到 system_event
+function handleSystem(text) {
+  appendItemToConv('self', { kind: 'system', text, time: Date.now() });
+}
+
+// 收到 agent_conversation
+function handleAgentConversation(data) {
   const otherUid = data.from_user_id === userId ? data.to_user_id : data.from_user_id;
   const otherName = data.from_user_id === userId ? data.to : data.from;
   const myName = data.from_user_id === userId ? data.from : data.to;
-  if (myName && !myAgentName) myAgentName = myName;
   const convId = `pair-${otherUid}`;
   if (!conversations[convId]) {
     conversations[convId] = {
       id: convId,
       name: `${myName || '我的助手'} ↔ ${otherName}`,
       icon: '🔀',
-      events: [],
+      items: [],
       unread: 0,
       isPair: true,
-      otherUid,
+      _pendingDetails: [],
     };
   }
-  pushEvent(convId, { type: 'agent_conversation', data, time: Date.now() });
-}
-
-function routeSelfEvent(type, data) {
-  pushEvent('self', {
-    type,
-    content: data.text || '',
+  const isMineOutgoing = data.from_user_id === userId;
+  appendItemToConv(convId, {
+    kind: isMineOutgoing ? 'agent_out' : 'agent_in',
+    text: data.text || '',
+    agentName: data.from,
     time: Date.now(),
   });
 }
 
 // ── 参数校验 ──
 if (!token || !userId) {
-  showBanner('❌ 缺少 <code>token</code> 或 <code>user_id</code> 参数。<br>请在微信里向 bot 发一句「<b>/看板</b>」，bot 会回带正确参数的 URL。');
+  showBanner('❌ 缺少 <code>token</code> 或 <code>user_id</code> 参数。<br>请在微信里向 bot 发一句「<b>/看板</b>」。');
   setStatus('参数缺失', 'error');
   throw new Error('missing params');
 }
 
 $whoLabel.textContent = userId;
-
-// 初始渲染
 renderSidebar();
 renderChatArea();
 
@@ -530,7 +601,7 @@ renderChatArea();
     const r = await fetch(`${API}/config?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}`);
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      showBanner(`❌ ${err.error || '鉴权失败（token 可能已过期）'}<br>请在微信里重新发「<b>/看板</b>」。`);
+      showBanner(`❌ ${err.error || '鉴权失败'}<br>请在微信里重新发「<b>/看板</b>」。`);
       setStatus('鉴权失败', 'error');
       return;
     }
@@ -541,19 +612,15 @@ renderChatArea();
     return;
   }
 
-  // 拉历史（都归到 self 会话）
+  // 历史
   try {
     const r = await fetch(`${API}/history?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}&limit=50`);
     if (r.ok) {
       const data = await r.json();
       if (data.messages && data.messages.length) {
         for (const m of data.messages) {
-          conversations.self.events.push({
-            type: m.role,
-            content: m.content,
-            time: Date.now(),
-            historical: true,
-          });
+          const kind = m.role === 'assistant' ? 'assistant' : (m.role === 'system' ? 'system' : 'user');
+          conversations.self.items.push({ kind, text: m.content, time: Date.now(), historical: true });
         }
         renderChatArea();
         renderSidebar();
@@ -561,7 +628,6 @@ renderChatArea();
     }
   } catch (e) { console.warn('历史加载失败', e); }
 
-  // Pusher
   const pusher = new Pusher(cfg.pusher_key, {
     cluster: cfg.pusher_cluster,
     authEndpoint: `${API}/pusher-auth?token=${encodeURIComponent(token)}`,
@@ -576,15 +642,13 @@ renderChatArea();
     setStatus('订阅失败', 'error');
   });
 
-  ['user_message', 'assistant_reply',
-   'verbose_thinking', 'verbose_tool_call', 'verbose_tool_out',
-   'system_event'].forEach(evt => {
-    channel.bind(evt, (data) => {
-      const type = (evt === 'system_event') ? 'system' : evt;
-      routeSelfEvent(type, data);
-    });
-  });
-  channel.bind('agent_conversation', (data) => routeAgentConversation(data));
+  channel.bind('user_message', (d) => handleUser(d.text || ''));
+  channel.bind('assistant_reply', (d) => handleAssistant(d.text || ''));
+  channel.bind('verbose_thinking', (d) => handleVerbose('thinking', d.text || ''));
+  channel.bind('verbose_tool_call', (d) => handleVerbose('tool_call', d.text || ''));
+  channel.bind('verbose_tool_out', (d) => handleVerbose('tool_out', d.text || ''));
+  channel.bind('system_event', (d) => handleSystem(d.text || ''));
+  channel.bind('agent_conversation', (d) => handleAgentConversation(d));
 })();
 </script>
 </body>
