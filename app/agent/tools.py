@@ -60,11 +60,12 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     - 工具会返回"等待授权"，你告诉用户"已发起，等应答"就好
 
     对方不在线 / 找不到 → 工具返回明确原因；**如实告诉用户"没找到 XX"**，
-    **绝对不要**自作主张换成 bot_users 表里的别人（比如用户说找"老师"你却调 call_agent("危呃呃")，
-    这是严重错误）。
+    **绝对不要**自作主张换成 bot_users 表里的别人。
 
-    ⚠️ 如果用户说的是**"老师"**：**用 ask_teacher 工具**，不是 call_agent。老师是跨用户共享
-    的教学 Agent，不在 bot_users 表里，call_agent 找不到它。"""
+    可以调用的 target 包括：
+    - 具体的人（如"危博"、"危呃呃"）：对方是普通用户助手
+    - **"老师"**：跨用户共享的教学 Agent，专门帮用户讲清楚复杂概念（苏格拉底+费曼式教学）
+      用户说「找老师讲讲XX / 问老师 / 让老师教我」→ call_agent(target_name="老师", ...)"""
     from app import realtime
     from app.agent import conversation
     from app.agent.runner import VoiceTaskAgent
@@ -82,11 +83,6 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         return (f"[call_agent] 已经和其他 Agent 交换了 {conversation.MAX_ROUNDS} 轮消息，"
                 f"到达上限。请直接回复用户当前进展。")
 
-    # 特殊拦截：用户其实想找老师
-    if target_name in ("老师", "teacher", "老師"):
-        return ("[call_agent] 「老师」不在 bot 用户表里，它是跨用户共享的教学 Agent。"
-                "请改用 ask_teacher(question=...) 工具，不要用 call_agent。")
-
     users = BotUsersStore()
     target = users.find_by_name(target_name)
     if target is None:
@@ -102,12 +98,15 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     sender = users.get(user_id)
     sender_display = (sender.display_name if sender and sender.display_name else "某个用户")
     target_label = target.display_name or target.user_id
-    target_require_auth = UserSettingsStore().get_require_authorization(target.user_id)
+    is_system_target = target.user_id.startswith("system:")
+    target_require_auth = (not is_system_target) and UserSettingsStore().get_require_authorization(target.user_id)
 
     # 双方 channel 都推同一条 agent_conversation 事件，两边看板都能看到这一轮
+    # 系统 Agent（如老师）没有 pusher channel，只推 sender 那一侧就好
     def _publish_both(payload: dict) -> None:
         realtime.publish(user_id, "agent_conversation", payload)
-        realtime.publish(target.user_id, "agent_conversation", payload)
+        if not is_system_target:
+            realtime.publish(target.user_id, "agent_conversation", payload)
 
     _publish_both({
         "round": round_num,
@@ -118,6 +117,28 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         "to_user_id": target.user_id,
         "text": message,
     })
+
+    # 特殊路径：如果 target 是系统 Agent（如老师），走对应的 handler
+    if target.user_id == "system:teacher":
+        from app.agent import teacher as _teacher
+        try:
+            reply = _teacher.handle(user_id, message)
+        except Exception as e:  # noqa: BLE001
+            return f"[call_agent] 老师处理失败：{e}"
+        reply = (reply or "").strip() or "（老师暂无回复）"
+        _publish_both({
+            "round": round_num,
+            "direction": "←",
+            "from": target_label,
+            "from_user_id": target.user_id,
+            "to": sender_display,
+            "to_user_id": user_id,
+            "text": reply,
+        })
+        return (f"「老师」回复：\n{reply}\n\n"
+                f"[提示] 老师用苏格拉底+费曼方法讲解。老师的回复中：\n"
+                f"- 如果是**解释**：请综合成一段自然的中文给你的用户\n"
+                f"- 如果是**反问**（比如 '你觉得 XX 是什么？'）：**原样传给用户**，不要代答")
 
     # 授权模式开启 → 走异步 push + 授权流（用户 A 会等 B 用户批准）
     if target_require_auth:
@@ -170,41 +191,6 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
             f"[提示] 请综合对方回复给你的用户一个自然的中文回应。用户微信不会自动看到原文。"
             f"如果对方回复没把事情说清、需要追问才能完成用户交办的事，可以再调用 call_agent 追问"
             f"（第 {round_num}/{conversation.MAX_ROUNDS} 轮，还剩 {conversation.MAX_ROUNDS - round_num} 次）。")
-
-
-# ── ask_teacher ─────────────────────────────────────────────
-@tool
-def ask_teacher(question: str, user_id: UserId = "default") -> str:
-    """把一个复杂概念/难题**转交给"老师"Agent**帮用户讲清楚。老师是一个**跨用户共享**的
-    特殊 Agent，用苏格拉底 + 费曼方法教学（不直接灌答案，而是类比 + 追问引导）。
-
-    **触发场景**：用户说
-    - 「找老师帮我讲一下 XX」/「问老师 XX 是什么」/「让老师教我」
-    - 「XX 我看不懂，找老师问问」/「叫老师给我讲讲 XX」
-
-    ⚠️ **绝对不要**把"老师"当成 call_agent 的 target_name。老师**不在 bot_users 表里**，
-    call_agent("老师") 会找不到。**要找老师，就用这个 ask_teacher 工具**。
-
-    ⚠️ **不适用**的场景：
-    - 用户就是要闲聊 / 记东西 / 派任务 → 用别的工具或自己答，别烦老师
-    - 用户明确要联系具体的某个"人"（"危博"、"危呃呃"等）→ 用 call_agent 而非 ask_teacher
-
-    工具会同步返回老师的答复。你要：
-    - 老师给的是**解释**：综合成一段自然的中文告诉用户
-    - 老师给的是**反问**（"你觉得 XX 是什么？"）：**原样传给用户**，不要代答"""
-    from app.agent import teacher as _teacher
-
-    question = (question or "").strip()
-    if not question:
-        return "[ask_teacher] 缺少问题"
-    try:
-        reply = _teacher.handle(user_id, question)
-    except Exception as e:  # noqa: BLE001
-        return f"[ask_teacher] 老师暂时不可用：{e}"
-    reply = (reply or "").strip() or "（老师暂无回复）"
-    return (f"「老师」回复：\n{reply}\n\n"
-            f"[提示] 请把老师的话综合成一段自然的中文给你的用户。"
-            f"如果老师提了反问，请原样传给用户，不要自己代答。")
 
 
 # ── set_my_name ─────────────────────────────────────────────
@@ -285,7 +271,7 @@ def web_search(query: str, user_id: UserId = "default") -> str:
 # 所有工具（runner 直接 bind_tools(TOOLS)）
 TOOLS = [
     structure_task, start_recording,
-    set_my_name, set_agent_name, call_agent, ask_teacher,
+    set_my_name, set_agent_name, call_agent,
     web_search,
 ]
 BY_NAME = {t.name: t for t in TOOLS}

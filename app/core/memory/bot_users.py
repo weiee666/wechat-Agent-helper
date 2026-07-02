@@ -102,6 +102,36 @@ class BotUsersStore:
         finally:
             conn.close()
 
+    def register_system_agent(self, user_id: str, display_name: str, agent_name: str) -> None:
+        """注册一个"系统 Agent"（没有对应真实用户/iLink bot）。
+        典型用途：老师（system:teacher）等跨用户共享 Agent。
+        这些 Agent 会跟普通用户一样出现在 bot_users 表里，被 call_agent 用名字找到，
+        但没有 iLink bot 也没有 pusher channel。
+        status 强制 'running'（系统 Agent 永远在线）。"""
+        if not user_id:
+            return
+        conn = get_conn()
+        try:
+            existing = conn.execute(
+                "SELECT user_id FROM bot_users WHERE user_id=?", (user_id,)
+            ).fetchone()
+            now = _now()
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO bot_users(user_id, display_name, agent_name, account_id,"
+                    " status, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+                    (user_id, display_name, agent_name, "system", "running", now, now),
+                )
+            else:
+                conn.execute(
+                    "UPDATE bot_users SET display_name=?, agent_name=?, status='running',"
+                    " updated_at=? WHERE user_id=?",
+                    (display_name, agent_name, now, user_id),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
     def touch_last_seen(self, user_id: str) -> None:
         """收到该用户消息时更新 last_seen。"""
         if not user_id:

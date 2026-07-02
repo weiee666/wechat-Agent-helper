@@ -25,6 +25,14 @@ def main() -> None:
     if "--login" in sys.argv:
         ilink.login(qr_web="--qr-web" in sys.argv)  # 存进 data/accounts/
 
+    # 系统 Agent 注册（老师等——没有 iLink bot 但可以被 call_agent 找到）
+    try:
+        from app.agent.teacher import register_in_bot_users as _reg_teacher
+        _reg_teacher()
+        print("👨‍🏫 老师 Agent 已注册（可用 call_agent(target_name='老师', ...) 找到）")
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ 老师注册失败: {e}")
+
     n = manager.start_all()
     print(f"🚀 已拉起 {n} 个已登录账号的收消息线程")
     for aid in manager.list_running():

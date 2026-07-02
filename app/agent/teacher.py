@@ -186,3 +186,21 @@ def handle(user_id: str, text: str) -> str:
 
 def history(user_id: str) -> list[dict]:
     return _teacher.get_history(user_id)
+
+
+# 系统 Agent 的固定标识
+TEACHER_USER_ID = "system:teacher"
+TEACHER_DISPLAY_NAME = "老师"
+TEACHER_AGENT_NAME = "老师"
+
+
+def register_in_bot_users() -> None:
+    """让老师作为 A2A 兼容的 Agent 出现在 bot_users 表里，
+    用户助手才能通过 call_agent("老师", ...) 找到它。启动时调一次即可。"""
+    from app.core.memory.bot_users import BotUsersStore
+    BotUsersStore().register_system_agent(
+        user_id=TEACHER_USER_ID,
+        display_name=TEACHER_DISPLAY_NAME,
+        agent_name=TEACHER_AGENT_NAME,
+    )
+    logger.info("老师 Agent 已注册到 bot_users 表（user_id=%s）", TEACHER_USER_ID)
