@@ -200,15 +200,15 @@ class WeixinAgentExecutor(AgentExecutor):
             return
 
         # 授权通过，返回 reply
-        agent_sig = target.display_name or self.target_user_id
         if target.agent_name:
             agent_sig = f"{target.display_name}的助手 {target.agent_name}"
         else:
             agent_sig = f"{target.display_name}的助手"
-        msg = _make_completion_message(task_id, context_id, reply, agent_sig)
-        await event_queue.enqueue_event(msg)
+        # SDK 要求 task 模式下用 TaskStatusUpdateEvent(COMPLETED) 携带最终消息
+        # 不能直接 enqueue Message 对象
         await event_queue.enqueue_event(
-            _make_status_event(task_id, context_id, TaskState.TASK_STATE_COMPLETED)
+            _make_status_event(task_id, context_id, TaskState.TASK_STATE_COMPLETED,
+                               message_text=f"{agent_sig}：\n{reply}")
         )
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
