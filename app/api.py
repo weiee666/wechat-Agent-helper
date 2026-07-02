@@ -94,6 +94,41 @@ def session_history(user_id: str, token: str = "", limit: int = 50):
     }
 
 
+@app.get("/teacher/history")
+def teacher_history(user_id: str = "", token: str = ""):
+    """看板"跟老师聊" tab 打开时拉一次历史。"""
+    err = _auth_or_401(user_id, token)
+    if err:
+        return err
+    from app.agent import teacher
+    return {"messages": teacher.history(user_id)}
+
+
+@app.post("/teacher/chat")
+async def teacher_chat(request: Request):
+    """看板输入框发消息给老师。body: {user_id, token, message}。
+    老师处理是**同步**的（tool loop 里可能调 web_search，也就是几秒）；
+    过程中通过 realtime 推 teacher_* 事件到 user 的 Pusher channel。"""
+    body = await request.json()
+    user_id = body.get("user_id") or ""
+    token = body.get("token") or ""
+    message = (body.get("message") or "").strip()
+    err = _auth_or_401(user_id, token)
+    if err:
+        return err
+    if not message:
+        return JSONResponse({"error": "message 不能空"}, status_code=400)
+
+    from app.agent import teacher
+    try:
+        reply = teacher.handle(user_id, message)
+    except Exception as e:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger(__name__).exception("teacher.handle 失败")
+        return JSONResponse({"error": f"老师处理失败: {e}"}, status_code=500)
+    return {"reply": reply}
+
+
 @app.post("/pusher/auth")
 async def pusher_auth(request: Request, token: str = ""):
     """Pusher private channel 订阅签名端点。

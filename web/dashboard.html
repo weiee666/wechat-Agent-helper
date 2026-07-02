@@ -294,6 +294,48 @@
     z-index: 100;
   }
   #banner code { background: rgba(0,0,0,0.05); padding: 2px 6px; border-radius: 4px; }
+
+  /* 输入区（仅在"跟老师聊" tab 显示） */
+  .chat-input-area {
+    padding: 12px 20px;
+    background: var(--bg-header);
+    border-top: 1px solid var(--border);
+    display: none;
+    gap: 8px;
+    align-items: flex-end;
+  }
+  .chat-input-area.visible { display: flex; }
+  .chat-input-area textarea {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    resize: none;
+    min-height: 36px;
+    max-height: 120px;
+    background: white;
+    outline: none;
+    line-height: 1.4;
+  }
+  .chat-input-area textarea:focus { border-color: #06ad56; }
+  .chat-input-area button {
+    background: #06ad56;
+    color: white;
+    border: none;
+    padding: 8px 20px;
+    border-radius: 6px;
+    font-size: 14px;
+    cursor: pointer;
+    font-weight: 500;
+    height: 36px;
+    flex-shrink: 0;
+  }
+  .chat-input-area button:disabled {
+    background: #b6d4b7;
+    cursor: not-allowed;
+  }
 </style>
 </head>
 <body>
@@ -316,6 +358,10 @@
     <div class="chat-messages" id="chatMessages">
       <div class="chat-messages-inner" id="chatInner"></div>
     </div>
+    <div class="chat-input-area" id="inputArea">
+      <textarea id="teacherInput" placeholder="想搞懂什么？（Enter 发送，Shift+Enter 换行）" rows="1"></textarea>
+      <button id="sendBtn">发送</button>
+    </div>
   </section>
 </div>
 
@@ -327,6 +373,9 @@ const $chatTitle = document.getElementById('chatTitle');
 const $chatSubtitle = document.getElementById('chatSubtitle');
 const $chatMessages = document.getElementById('chatMessages');
 const $chatInner = document.getElementById('chatInner');
+const $inputArea = document.getElementById('inputArea');
+const $teacherInput = document.getElementById('teacherInput');
+const $sendBtn = document.getElementById('sendBtn');
 
 const params = new URLSearchParams(location.search);
 const token = params.get('token');
@@ -347,6 +396,17 @@ const conversations = {
     isPair: false,
     _pendingDetails: [],  // 累积到下一个 assistant 的 details
   },
+  teacher: {
+    id: 'teacher',
+    name: '跟老师聊',
+    icon: '👨‍🏫',
+    items: [],
+    unread: 0,
+    isPair: false,
+    isTeacher: true,
+    historyLoaded: false,
+    _pendingDetails: [],
+  },
 };
 let currentConvId = 'self';
 
@@ -364,8 +424,9 @@ function formatTime(ts) {
 function renderSidebar() {
   $convList.innerHTML = '';
   const selfConv = conversations.self;
+  const teacherConv = conversations.teacher;
   const pairs = Object.values(conversations).filter(c => c.isPair);
-  const items = [selfConv, ...pairs];
+  const items = [selfConv, teacherConv, ...pairs];
   for (const conv of items) {
     const el = document.createElement('div');
     el.className = 'conv-item' + (conv.id === currentConvId ? ' active' : '');
@@ -478,19 +539,31 @@ function renderChatArea() {
     $chatInner.innerHTML = '';
     $chatTitle.textContent = '选择一个会话';
     $chatSubtitle.textContent = '';
+    $inputArea.classList.remove('visible');
     return;
   }
   $chatTitle.textContent = conv.name;
-  $chatSubtitle.textContent = conv.isPair
-    ? '跨 Agent 对话（默认不打扰双方微信，只在此显示）'
-    : `观察对象：${userId}`;
+  $chatSubtitle.textContent = conv.isTeacher
+    ? '苏格拉底式启发 + 费曼式简化解释（每用户独立记忆）'
+    : (conv.isPair
+       ? '跨 Agent 对话（默认不打扰双方微信，只在此显示）'
+       : `观察对象：${userId}`);
+  // 输入框只在"跟老师聊"tab 显示
+  if (conv.isTeacher) {
+    $inputArea.classList.add('visible');
+    setTimeout(() => $teacherInput.focus(), 100);
+  } else {
+    $inputArea.classList.remove('visible');
+  }
   $chatInner.innerHTML = '';
   if (conv.items.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    empty.innerHTML = conv.isPair
-      ? `<div class="icon">🔀</div>暂无对话内容，等待 Agent 之间交流…`
-      : `<div class="icon">💬</div>暂无对话，去微信里跟你的助手说点什么吧`;
+    empty.innerHTML = conv.isTeacher
+      ? `<div class="icon">👨‍🏫</div>老师在这里 —— 想搞懂什么就问吧`
+      : (conv.isPair
+         ? `<div class="icon">🔀</div>暂无对话内容，等待 Agent 之间交流…`
+         : `<div class="icon">💬</div>暂无对话，去微信里跟你的助手说点什么吧`);
     $chatInner.appendChild(empty);
     return;
   }
@@ -504,10 +577,71 @@ function renderChatArea() {
 
 function selectConversation(convId) {
   currentConvId = convId;
-  if (conversations[convId]) conversations[convId].unread = 0;
+  const conv = conversations[convId];
+  if (conv) conv.unread = 0;
+  // 老师会话第一次打开时拉历史
+  if (conv && conv.isTeacher && !conv.historyLoaded) {
+    conv.historyLoaded = true;
+    loadTeacherHistory();
+  }
   renderSidebar();
   renderChatArea();
 }
+
+async function loadTeacherHistory() {
+  try {
+    const r = await fetch(`${API}/teacher-history?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    if (!data.messages || !data.messages.length) return;
+    const conv = conversations.teacher;
+    for (const m of data.messages) {
+      const kind = m.role === 'assistant' ? 'assistant' : 'user';
+      conv.items.push({ kind, text: m.content, time: Date.now(), historical: true });
+    }
+    if (currentConvId === 'teacher') renderChatArea();
+    renderSidebar();
+  } catch (e) { console.warn('老师历史加载失败', e); }
+}
+
+async function sendToTeacher(text) {
+  if (!text.trim()) return;
+  $sendBtn.disabled = true;
+  $teacherInput.disabled = true;
+  try {
+    const r = await fetch(`${API}/teacher-chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ user_id: userId, token, message: text }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      alert(`老师处理失败：${err.error || r.status}`);
+    }
+    // reply 会通过 pusher teacher_reply 事件到，不需要读 response body
+  } catch (e) {
+    alert(`网络错误：${e.message}`);
+  } finally {
+    $sendBtn.disabled = false;
+    $teacherInput.disabled = false;
+    $teacherInput.value = '';
+    $teacherInput.style.height = 'auto';
+    $teacherInput.focus();
+  }
+}
+
+// 输入框 UX：Enter 发送，Shift+Enter 换行
+$teacherInput.addEventListener('input', () => {
+  $teacherInput.style.height = 'auto';
+  $teacherInput.style.height = Math.min($teacherInput.scrollHeight, 120) + 'px';
+});
+$teacherInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendToTeacher($teacherInput.value);
+  }
+});
+$sendBtn.addEventListener('click', () => sendToTeacher($teacherInput.value));
 
 // ── 事件路由 ──
 function appendItemToConv(convId, item) {
@@ -649,7 +783,32 @@ renderChatArea();
   channel.bind('verbose_tool_out', (d) => handleVerbose('tool_out', d.text || ''));
   channel.bind('system_event', (d) => handleSystem(d.text || ''));
   channel.bind('agent_conversation', (d) => handleAgentConversation(d));
+
+  // 老师相关事件
+  channel.bind('teacher_user_message', (d) => handleTeacherUser(d.text || ''));
+  channel.bind('teacher_reply', (d) => handleTeacherReply(d.text || ''));
+  channel.bind('teacher_thinking', (d) => handleTeacherVerbose('thinking', d.text || ''));
+  channel.bind('teacher_tool_call', (d) => handleTeacherVerbose('tool_call', d.text || ''));
+  channel.bind('teacher_tool_out', (d) => handleTeacherVerbose('tool_out', d.text || ''));
 })();
+
+// 老师事件路由（跟 self 会话对称）
+function handleTeacherUser(text) {
+  conversations.teacher._pendingDetails = [];
+  appendItemToConv('teacher', { kind: 'user', text, time: Date.now() });
+}
+function handleTeacherVerbose(type, text) {
+  conversations.teacher._pendingDetails.push({ type, text });
+}
+function handleTeacherReply(text) {
+  const details = conversations.teacher._pendingDetails;
+  conversations.teacher._pendingDetails = [];
+  appendItemToConv('teacher', {
+    kind: 'assistant', text, time: Date.now(),
+    agentName: '老师',
+    details: details.slice(),
+  });
+}
 </script>
 </body>
 </html>
