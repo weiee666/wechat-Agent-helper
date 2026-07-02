@@ -28,6 +28,7 @@ def _build_reply(msg: dict, token: str) -> tuple[str, bool, str]:
     录制中途累积时不发送（静默不打扰）。
     详细模式下，中间过程通过 emit 实时推给微信（用同一 context_token 连发）；
     同时通过 realtime_emit 无关 verbose 推到实时面板 Pusher channel。"""
+    from app import stt as _stt
     frm = msg.get("from_user_id") or "default"
     ctx = msg.get("context_token")
 
@@ -38,11 +39,17 @@ def _build_reply(msg: dict, token: str) -> tuple[str, bool, str]:
         event = _REALTIME_EVENT.get(kind, "verbose")
         realtime.publish(frm, event, {"text": text})
 
-    # 用户主键 = from_user_id（微信号），稳定；bot 的 account_id 只用于发消息，不参与数据隔离
-    result = _agent.handle_ilink_message(msg, from_user_id=frm, emit=emit,
-                                         realtime_emit=realtime_emit)
-    if result is None:
+    # STT 先做——原文推到看板要在 Agent 思考/工具事件"之前"，
+    # 保持因果顺序（用户→思考→工具→结果→回复）。
+    transcript = _stt.transcribe_ilink_message(msg)
+    if not transcript:
         return "（没取到文字内容。若发的是语音且无自带转写，需要再接 STT。）", True, ""
+    if frm:
+        realtime.publish(frm, "user_message", {"text": transcript})
+
+    # 用户主键 = from_user_id（微信号），稳定；bot 的 account_id 只用于发消息，不参与数据隔离
+    result = _agent.handle_text(transcript, user_id=frm, emit=emit,
+                                realtime_emit=realtime_emit)
     return result.reply, result.send, result.transcript
 
 
@@ -76,9 +83,7 @@ def poll_account(session: dict, stop_event: threading.Event) -> None:
                 except Exception as e:  # noqa: BLE001
                     reply, send, transcript = f"⚠️ 处理出错：{e}", True, ""
                     logger.exception("[%s] 处理消息失败", account_id)
-                # 推用户消息到实时面板（用 transcript，可能是语音转写后的文本）
-                if transcript and frm:
-                    realtime.publish(frm, "user_message", {"text": transcript})
+                # user_message 事件已在 _build_reply 里 STT 后立即推给看板（保证因果顺序）
                 if send and reply:
                     ilink.send_message(token, frm, reply, ctx)
                     if frm:
