@@ -125,6 +125,17 @@ class WeixinAgentExecutor(AgentExecutor):
             )
             return
 
+        # 先 enqueue Task 对象（SDK 要求 TaskStatusUpdateEvent 前必须有 Task）
+        task = Task()
+        task.id = task_id
+        task.context_id = context_id
+        initial_status = TaskStatus()
+        initial_status.state = TaskState.TASK_STATE_SUBMITTED
+        ts = timestamp_pb2.Timestamp(); ts.GetCurrentTime()
+        initial_status.timestamp.CopyFrom(ts)
+        task.status.CopyFrom(initial_status)
+        await event_queue.enqueue_event(task)
+
         # publish WORKING（进入处理）
         await event_queue.enqueue_event(
             _make_status_event(task_id, context_id, TaskState.TASK_STATE_WORKING,
