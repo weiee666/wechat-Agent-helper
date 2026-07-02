@@ -120,7 +120,17 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         "text": reply,
     })
 
-    return f"「{target.display_name or target.user_id}」的 Agent 回复：\n{reply}"
+    # 直接把 B 的原话 push 到 sender 微信；本 Agent 结束后不再转述。
+    from app.channel import dispatch
+    target_label = target.display_name or target.user_id
+    signature = f"{target_label}的助手" + (f" {target.agent_name}" if target.agent_name else "")
+    push_text = f"{signature}：\n{reply}"
+    if dispatch.push_to_user(user_id, push_text):
+        conversation.mark_reply_pushed()
+
+    # 工具结果给 LLM 看的还是有内容的（避免 LLM 因空结果做奇怪反应），
+    # 但真正决定最终不再输出、微信不再重发的开关在 conversation.was_reply_pushed。
+    return f"「{target_label}」的 Agent 回复：\n{reply}\n\n[已直接把这段原话以对方助手名义 push 给用户微信；你无需再向用户重复。]"
 
 
 # ── set_my_name ─────────────────────────────────────────────

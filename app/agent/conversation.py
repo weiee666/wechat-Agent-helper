@@ -23,6 +23,16 @@ def reset() -> None:
     """poller 处理新用户消息时清零。"""
     _state.round = 0
     _state.origin_user_id = None
+    _state.reply_pushed = False
+
+
+def mark_reply_pushed() -> None:
+    """call_agent 已把对方原话 push 到 sender 微信 —— 起源 Agent 不用再输出。"""
+    _state.reply_pushed = True
+
+
+def was_reply_pushed() -> bool:
+    return getattr(_state, "reply_pushed", False)
 
 
 def set_origin(user_id: str) -> None:

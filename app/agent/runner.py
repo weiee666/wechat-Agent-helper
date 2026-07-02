@@ -229,6 +229,11 @@ class VoiceTaskAgent:
             pass
 
         memory_bridge.save_turn(user_id, MessageRole.USER, text)
+        # 直传模式：如果 call_agent 已经把对方原话 push 到用户微信，本 Agent 不再多嘴
+        if conversation.was_reply_pushed():
+            trace = "[已代联络对方 Agent；对方助手的回复已直接以对方名义 push 到用户微信，未在此处二次转述]"
+            memory_bridge.save_turn(user_id, MessageRole.ASSISTANT, trace)
+            return Result(transcript=text, reply="", used_tool=used_tool, send=False)
         memory_bridge.save_turn(user_id, MessageRole.ASSISTANT, reply)
         return Result(transcript=text, reply=reply, used_tool=used_tool)
 
