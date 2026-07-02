@@ -59,3 +59,11 @@ DASHBOARD_URL_BASE = os.getenv("DASHBOARD_URL_BASE", "").strip()
 
 def pusher_ready() -> bool:
     return bool(PUSHER_APP_ID and PUSHER_KEY and PUSHER_SECRET and PUSHER_CLUSTER)
+
+
+# ── A2A（Agent-to-Agent 协议）─────────────────────────────
+# 我们对外暴露的 Base URL。外部 Agent Card 里的 endpoint URL 用它拼。
+# 生产要走 HTTPS + 域名；开发默认 IP+端口。空字符串时 Agent Card 不生成 URL。
+A2A_BASE_URL = os.getenv("A2A_BASE_URL", "").strip()
+# 服务方名字（放进 Agent Card 的 provider）
+A2A_PROVIDER_NAME = os.getenv("A2A_PROVIDER_NAME", "weixin-agent").strip()

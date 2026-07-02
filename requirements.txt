@@ -13,3 +13,5 @@ fastapi>=0.110
 uvicorn>=0.29
 # 实时旁观面板（Pusher pub/sub）
 pusher>=3.3
+# Agent-to-Agent 协议 SDK（Google 官方，含 FastAPI 集成）
+a2a-sdk[http-server]>=1.1

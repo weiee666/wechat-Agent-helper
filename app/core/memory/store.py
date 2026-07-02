@@ -113,6 +113,25 @@ CREATE TABLE IF NOT EXISTS bot_users (
 );
 CREATE INDEX IF NOT EXISTS idx_bot_users_display_name ON bot_users(display_name);
 CREATE INDEX IF NOT EXISTS idx_bot_users_agent_name ON bot_users(agent_name);
+
+-- A2A: 外部 Agent 调用我们时用的 API Key（key 本身不存，只存 hash 便于回收）。
+-- allowed_agents = '*' 或逗号分隔的 user_id 列表（限制这把 key 能调哪些 Agent）。
+CREATE TABLE IF NOT EXISTS api_keys (
+    key_hash        TEXT PRIMARY KEY,
+    key_name        TEXT NOT NULL DEFAULT '',
+    allowed_agents  TEXT NOT NULL DEFAULT '*',
+    created_at      TEXT NOT NULL DEFAULT '',
+    last_used       TEXT NOT NULL DEFAULT ''
+);
+
+-- A2A: 我们持有的外部 Agent 注册表，call_agent 找不到内部 user 时回退查这里。
+CREATE TABLE IF NOT EXISTS external_agents (
+    name            TEXT PRIMARY KEY,       -- 我们叫他"张三"（用户在对话里说的名字）
+    display_name    TEXT NOT NULL DEFAULT '',
+    endpoint_url    TEXT NOT NULL,
+    api_key         TEXT NOT NULL DEFAULT '',
+    added_at        TEXT NOT NULL DEFAULT ''
+);
 """
 
 

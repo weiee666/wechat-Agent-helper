@@ -15,8 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import config, dashboard_tokens, manager, onboard, realtime
+from app.a2a.server import router as a2a_router
 
-app = FastAPI(title="weixin-agent onboarding + dashboard")
+app = FastAPI(title="weixin-agent onboarding + dashboard + A2A")
+app.include_router(a2a_router)
 
 # 前端经 Vercel serverless 代理调用（服务器到服务器），本不需要 CORS；
 # 这里放开以便将来前端直连调试。内部试用阶段先全放开。
