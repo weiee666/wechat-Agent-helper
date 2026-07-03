@@ -519,6 +519,16 @@ const conversations = {
     historyLoaded: false,
     _pendingDetails: [],
   },
+  claude: {
+    id: 'claude',
+    name: '跟 Claude 聊',
+    icon: '🤖',
+    items: [],
+    unread: 0,
+    isPair: false,
+    isClaude: true,
+    _pendingDetails: [],
+  },
 };
 let currentConvId = 'self';
 
@@ -553,8 +563,9 @@ function renderSidebar() {
   $convList.innerHTML = '';
   const selfConv = conversations.self;
   const teacherConv = conversations.teacher;
+  const claudeConv = conversations.claude;
   const pairs = Object.values(conversations).filter(c => c.isPair);
-  const items = [selfConv, teacherConv, ...pairs];
+  const items = [selfConv, teacherConv, claudeConv, ...pairs];
   for (const conv of items) {
     const el = document.createElement('div');
     el.className = 'conv-item' + (conv.id === currentConvId ? ' active' : '');
@@ -684,16 +695,20 @@ function renderChatArea() {
   $chatTitle.textContent = conv.name;
   $chatSubtitle.textContent = conv.isTeacher
     ? '苏格拉底式启发 + 费曼式简化解释（每用户独立记忆）'
-    : (conv.isPair
-       ? '跨 Agent 对话（默认不打扰双方微信，只在此显示）'
-       : `观察对象：${userId}`);
+    : (conv.isClaude
+       ? 'Claude Code CLI（跑在你 Mac 上），需要本地 daemon 在线才能对话'
+       : (conv.isPair
+          ? '跨 Agent 对话（默认不打扰双方微信，只在此显示）'
+          : `观察对象：${userId}`));
   // 输入框对所有 tab 显示；placeholder 根据 conv 动态
   $inputArea.classList.add('visible');
   $panelInput.placeholder = conv.isTeacher
     ? '想搞懂什么？回车发送，Shift+Enter 换行'
-    : (conv.isPair
-       ? `直接跟「${conv.name.split('↔').pop().trim()}」说一句（以你自己身份）`
-       : '跟你的助手说...（回车发送，Shift+Enter 换行）');
+    : (conv.isClaude
+       ? 'Claude 是编程 + 执行专家，问什么都行'
+       : (conv.isPair
+          ? `直接跟「${conv.name.split('↔').pop().trim()}」说一句（以你自己身份）`
+          : '跟你的助手说...（回车发送，Shift+Enter 换行）'));
   setTimeout(() => $panelInput.focus(), 100);
   $chatInner.innerHTML = '';
   if (conv.items.length === 0) {
@@ -802,8 +817,8 @@ async function sendMessageInCurrentConv(text) {
   $panelInput.value = '';
   autoGrowPanelInput();
 
-  // "打字中" 三点动画（老师 tab 用👨‍🏫，别的用🤖或🔀）
-  const typingIcon = conv.isTeacher ? '👨‍🏫' : (conv.isPair ? '🔀' : '🤖');
+  // "打字中" 三点动画：老师👨‍🏫 / Claude🤖 / Agent 间🔀 / 自己助手🤖
+  const typingIcon = conv.isTeacher ? '👨‍🏫' : (conv.isClaude ? '🤖' : (conv.isPair ? '🔀' : '🤖'));
   showTypingBubble(typingIcon);
 
   try {
@@ -1018,7 +1033,27 @@ renderChatArea();
   channel.bind('teacher_thinking', (d) => handleTeacherVerbose('thinking', d.text || ''));
   channel.bind('teacher_tool_call', (d) => handleTeacherVerbose('tool_call', d.text || ''));
   channel.bind('teacher_tool_out', (d) => handleTeacherVerbose('tool_out', d.text || ''));
+
+  // Claude 相关事件
+  channel.bind('claude_user_message', (d) => handleClaudeUser(d.text || ''));
+  channel.bind('claude_reply', (d) => handleClaudeReply(d.text || ''));
 })();
+
+// Claude 事件路由
+function handleClaudeUser(text) {
+  if (text && text === _lastSentPerConv.claude) {
+    _lastSentPerConv.claude = '';
+    return;
+  }
+  appendItemToConv('claude', { kind: 'user', text, time: Date.now() });
+}
+function handleClaudeReply(text) {
+  if (currentConvId === 'claude') removeTypingBubble();
+  appendItemToConv('claude', {
+    kind: 'assistant', text, time: Date.now(),
+    agentName: 'Claude',
+  });
+}
 
 // 老师事件路由（跟 self 会话对称）
 function handleTeacherUser(text) {

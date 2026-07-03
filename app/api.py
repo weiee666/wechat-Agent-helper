@@ -181,6 +181,23 @@ async def panel_chat(request: Request):
             reply = teacher.handle(user_id, message)
             return {"reply": reply}
 
+        # ── claude：走 claude_agent.handle（需 Mac daemon 在线）──
+        if conv_id == "claude":
+            from app.agent import claude_agent
+            if not claude_agent.hub.is_online():
+                return JSONResponse(
+                    {"error": "Claude 目前不在线（Mac 端 claude_bridge daemon 未连接）"},
+                    status_code=503,
+                )
+            realtime.publish(user_id, "claude_user_message", {"text": message})
+            try:
+                reply = claude_agent.handle(user_id, message)
+            except Exception as e:  # noqa: BLE001
+                _log.getLogger(__name__).exception("claude_agent.handle 失败")
+                return JSONResponse({"error": f"Claude 处理失败: {e}"}, status_code=500)
+            realtime.publish(user_id, "claude_reply", {"text": reply})
+            return {"reply": reply}
+
         # ── pair-{other_uid}：直接给对方 Agent 发一条消息 ──
         if conv_id.startswith("pair-"):
             other_uid = conv_id[len("pair-"):]
