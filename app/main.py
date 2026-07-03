@@ -25,13 +25,19 @@ def main() -> None:
     if "--login" in sys.argv:
         ilink.login(qr_web="--qr-web" in sys.argv)  # 存进 data/accounts/
 
-    # 系统 Agent 注册（老师等——没有 iLink bot 但可以被 call_agent 找到）
+    # 系统 Agent 注册（老师、Claude 等——没有 iLink bot 但可以被 call_agent 找到）
     try:
         from app.agent.teacher import register_in_bot_users as _reg_teacher
         _reg_teacher()
         print("👨‍🏫 老师 Agent 已注册（可用 call_agent(target_name='老师', ...) 找到）")
     except Exception as e:  # noqa: BLE001
         print(f"⚠️ 老师注册失败: {e}")
+    try:
+        from app.agent.claude_agent import register_in_bot_users as _reg_claude
+        _reg_claude()
+        print("🤖 Claude Agent 已注册（等 Mac daemon 连 /a2a/agents/claude/register 后自动上线）")
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ Claude 注册失败: {e}")
 
     n = manager.start_all()
     print(f"🚀 已拉起 {n} 个已登录账号的收消息线程")

@@ -10,11 +10,12 @@
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app import config, dashboard_tokens, manager, onboard, realtime
+from app.a2a.api_keys import ApiKeyStore
 from app.a2a.server import router as a2a_router
 
 app = FastAPI(title="weixin-agent onboarding + dashboard + A2A")
@@ -235,6 +236,51 @@ async def panel_chat(request: Request):
     except Exception as e:  # noqa: BLE001
         _log.getLogger(__name__).exception("panel_chat 失败")
         return JSONResponse({"error": f"处理失败: {e}"}, status_code=500)
+
+
+@app.websocket("/a2a/agents/claude/register")
+async def claude_bridge_ws(ws: WebSocket, api_key: str = ""):
+    """Mac 上跑的 claude_bridge daemon 连过来。
+    连接需要 X-API-Key（或 query api_key=）。
+    收 {type: 'result'/'error', task_id, reply/error} 消息，转给 ClaudeAgentHub。
+    发 {type: 'task', task_id, prompt} 消息给 daemon 让它调 Claude。"""
+    # 兼容两种传 key 的方式：query 或 header
+    key = api_key or ws.headers.get("x-api-key", "") or ws.headers.get("X-API-Key", "")
+    if not key:
+        await ws.close(code=1008, reason="X-API-Key required")
+        return
+    meta = ApiKeyStore().verify(key)
+    if meta is None:
+        await ws.close(code=1008, reason="invalid api key")
+        return
+
+    await ws.accept()
+    import asyncio as _asyncio
+    from app.agent import claude_agent as _claude
+    loop = _asyncio.get_running_loop()
+    _claude.hub.attach(ws, loop)
+    try:
+        while True:
+            msg = await ws.receive_json()
+            mtype = msg.get("type")
+            task_id = msg.get("task_id") or ""
+            if mtype == "result":
+                _claude.hub.on_result(task_id, msg.get("reply") or "")
+            elif mtype == "error":
+                _claude.hub.on_error(task_id, msg.get("error") or "unknown")
+            elif mtype == "ping":
+                # heartbeat
+                await ws.send_json({"type": "pong"})
+            else:
+                # 未知消息，忽略
+                pass
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger(__name__).warning("Claude WS 异常: %s", e)
+    finally:
+        _claude.hub.detach()
 
 
 @app.post("/pusher/auth")

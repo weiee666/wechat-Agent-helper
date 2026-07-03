@@ -140,6 +140,29 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
                 f"- 如果是**解释**：请综合成一段自然的中文给你的用户\n"
                 f"- 如果是**反问**（比如 '你觉得 XX 是什么？'）：**原样传给用户**，不要代答")
 
+    # 特殊路径：Claude Agent（通过 WS 连到用户 Mac 上的 claude CLI）
+    if target.user_id == "system:claude":
+        from app.agent import claude_agent as _claude
+        if not _claude.hub.is_online():
+            return ("[call_agent] Claude 目前不在线：需要用户 Mac 上启动 claude_bridge daemon 连接过来。")
+        try:
+            reply = _claude.handle(user_id, message)
+        except Exception as e:  # noqa: BLE001
+            return f"[call_agent] Claude 处理失败：{e}"
+        reply = (reply or "").strip() or "（Claude 暂无回复）"
+        _publish_both({
+            "round": round_num,
+            "direction": "←",
+            "from": target_label,
+            "from_user_id": target.user_id,
+            "to": sender_display,
+            "to_user_id": user_id,
+            "text": reply,
+        })
+        return (f"「Claude」回复：\n{reply}\n\n"
+                f"[提示] Claude 是编程专家（跑在用户 Mac 上的 claude CLI）。请把它的回复"
+                f"综合成一段中文告诉用户；技术细节（命令、代码片段）保留原样。")
+
     # 授权模式开启 → 走异步 push + 授权流（用户 A 会等 B 用户批准）
     if target_require_auth:
         handshake_ok = bus.deliver_handshake(

@@ -108,10 +108,11 @@ class BotUsersStore:
 
     def register_system_agent(self, user_id: str, display_name: str, agent_name: str) -> None:
         """注册一个"系统 Agent"（没有对应真实用户/iLink bot）。
-        典型用途：老师（system:teacher）等跨用户共享 Agent。
+        典型用途：老师（system:teacher）、Claude（system:claude）等。
         这些 Agent 会跟普通用户一样出现在 bot_users 表里，被 call_agent 用名字找到，
         但没有 iLink bot 也没有 pusher channel。
-        status 强制 'running'（系统 Agent 永远在线）。"""
+        初始 status='running'——如果某类系统 Agent 需要外部连接（如 Claude 等 Mac daemon）
+        才算在线，注册后马上调 mark_system_offline 置为离线。"""
         if not user_id:
             return
         conn = get_conn()
@@ -132,6 +133,34 @@ class BotUsersStore:
                     " updated_at=? WHERE user_id=?",
                     (display_name, agent_name, now, user_id),
                 )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def mark_system_online(self, user_id: str) -> None:
+        """把系统 Agent 强制标记为 running（跳过 mark_offline 的保护）。"""
+        if not user_id:
+            return
+        conn = get_conn()
+        try:
+            conn.execute(
+                "UPDATE bot_users SET status='running', updated_at=? WHERE user_id=?",
+                (_now(), user_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def mark_system_offline(self, user_id: str) -> None:
+        """把系统 Agent 显式标记为 offline（供 Claude 断连时用）。"""
+        if not user_id:
+            return
+        conn = get_conn()
+        try:
+            conn.execute(
+                "UPDATE bot_users SET status='offline', updated_at=? WHERE user_id=?",
+                (_now(), user_id),
+            )
             conn.commit()
         finally:
             conn.close()
