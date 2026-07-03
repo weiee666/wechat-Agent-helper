@@ -282,7 +282,11 @@ async def claude_bridge_ws(ws: WebSocket, api_key: str = ""):
             mtype = msg.get("type")
             task_id = msg.get("task_id") or ""
             if mtype == "result":
-                _claude.hub.on_result(task_id, msg.get("reply") or "")
+                _claude.hub.on_result(
+                    task_id,
+                    msg.get("reply") or "",
+                    session_id=msg.get("session_id"),
+                )
             elif mtype == "error":
                 _claude.hub.on_error(task_id, msg.get("error") or "unknown")
             elif mtype == "ping":

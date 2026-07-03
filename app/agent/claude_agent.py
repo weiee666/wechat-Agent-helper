@@ -41,10 +41,11 @@ class _PendingTask:
     future: asyncio.Future
     prompt: str
     created_at: float
+    user_id: str = ""
 
 
 class ClaudeAgentHub:
-    """单例：管理 Mac daemon 的 WebSocket 连接 + 任务队列。"""
+    """单例：管理 Mac daemon 的 WebSocket 连接 + 任务队列 + per-user session。"""
 
     def __init__(self):
         self._ws = None                         # 当前活跃的 WebSocket 连接对象
@@ -52,6 +53,9 @@ class ClaudeAgentHub:
         self._pending: dict[str, _PendingTask] = {}
         self._queue: asyncio.Queue | None = None  # 任务发送队列（在 WS loop 上）
         self._lock = None                       # asyncio.Lock（一 Mac 一 session 串行处理）
+        # 每用户跟 Claude 独立 session（进程内存；断电重启即清空）
+        # user_id → Claude Code CLI 返回的 session_id
+        self._user_sessions: dict[str, str] = {}
 
     # ── WS 连接管理（FastAPI WebSocket handler 调用）──
     def attach(self, ws, loop) -> None:
@@ -90,12 +94,16 @@ class ClaudeAgentHub:
         return self._ws is not None
 
     # ── Mac 端发来的消息 ──
-    def on_result(self, task_id: str, reply: str) -> None:
-        """Mac 端收到任务后调 claude 返回来的结果，resolve pending future。"""
+    def on_result(self, task_id: str, reply: str, session_id: str | None = None) -> None:
+        """Mac 端收到任务后调 claude 返回来的结果，resolve pending future。
+        session_id：Claude Code 返回的 session_id，需要记住给下次用（--resume）。"""
         p = self._pending.pop(task_id, None)
         if p is None:
             logger.warning("收到未知 task_id 的 result: %s", task_id)
             return
+        # 更新该用户的 session_id
+        if session_id and getattr(p, "user_id", None):
+            self._user_sessions[p.user_id] = session_id
         if p.future.done():
             return
         loop = self._ws_loop
@@ -114,9 +122,18 @@ class ClaudeAgentHub:
                 p.future.set_exception, RuntimeError(f"Claude 端出错: {error}"),
             )
 
+    # ── session 管理 ──
+    def get_session(self, user_id: str) -> str | None:
+        return self._user_sessions.get(user_id) if user_id else None
+
+    def reset_session(self, user_id: str) -> None:
+        """用户"清空 Claude 记忆" 时调。"""
+        self._user_sessions.pop(user_id, None)
+
     # ── 外部调用（call_agent 特殊路径 / 看板 panel_chat）──
-    async def ask_async(self, prompt: str) -> str:
-        """异步请求 Claude 处理一段 prompt，返回 stdout。
+    async def ask_async(self, user_id: str, prompt: str) -> str:
+        """异步请求 Claude 处理一段 prompt，返回 reply。
+        自动带上 user_id 关联的 session_id（首次为 None，Claude 返回后记录，下次接续）。
         用 asyncio.Lock 保证一 Mac 一次一个 session（Claude CLI 不能并行）。"""
         if not self.is_online():
             raise RuntimeError("Claude 目前不在线（Mac 端 daemon 未连接）")
@@ -129,7 +146,10 @@ class ClaudeAgentHub:
         future: asyncio.Future = loop.create_future()
         self._pending[task_id] = _PendingTask(
             task_id=task_id, future=future, prompt=prompt, created_at=time.time(),
+            user_id=user_id,
         )
+
+        session_id = self._user_sessions.get(user_id)
 
         async def _do():
             async with self._lock:  # 排队串行
@@ -137,11 +157,14 @@ class ClaudeAgentHub:
                 if ws is None:
                     self._pending.pop(task_id, None)
                     raise RuntimeError("Claude 已断连")
-                await ws.send_json({
+                payload = {
                     "type": "task",
                     "task_id": task_id,
                     "prompt": prompt,
-                })
+                }
+                if session_id:
+                    payload["session_id"] = session_id
+                await ws.send_json(payload)
                 try:
                     return await asyncio.wait_for(future, timeout=TASK_TIMEOUT_SECONDS)
                 except asyncio.TimeoutError:
@@ -160,11 +183,11 @@ class ClaudeAgentHub:
         # 同步等待
         return await asyncio.wrap_future(cf)
 
-    def ask_sync(self, prompt: str) -> str:
+    def ask_sync(self, user_id: str, prompt: str) -> str:
         """同步接口（供 call_agent 从 handle_agent_message 调用）。"""
         if self._ws_loop is None:
             raise RuntimeError("Claude Hub 未就绪")
-        cf = asyncio.run_coroutine_threadsafe(self.ask_async(prompt), self._ws_loop)
+        cf = asyncio.run_coroutine_threadsafe(self.ask_async(user_id, prompt), self._ws_loop)
         return cf.result(timeout=TASK_TIMEOUT_SECONDS + 5)
 
 
@@ -193,6 +216,6 @@ def register_in_bot_users() -> None:
 
 
 def handle(user_id: str, message: str) -> str:
-    """同步入口（tools.call_agent 特殊路径调用）。user_id 参数保持接口一致，暂未用到。"""
-    _ = user_id
-    return hub.ask_sync(message)
+    """同步入口（tools.call_agent 特殊路径 / panel_chat 调用）。
+    per-user session 自动关联（第一次问 Claude 创建 session，后续用 --resume 接续）。"""
+    return hub.ask_sync(user_id, message)
