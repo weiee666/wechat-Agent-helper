@@ -38,9 +38,13 @@ export default function MessageList({ conv, me }) {
       ref={scrollRef}
       style={{
         flex: 1,
+        minHeight: 0,
         overflowY: 'auto',
+        overflowX: 'hidden',
         padding: '16px 24px',
         background: 'var(--bg-chat)',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain',
       }}
     >
       <div style={{ maxWidth: 780, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 10 }}>

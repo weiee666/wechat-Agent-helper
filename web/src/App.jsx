@@ -351,6 +351,7 @@ export default function App() {
             justifyContent: 'space-between',
             gap: 8,
             height: 56,
+            flexShrink: 0,
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
               {isMobile && (
@@ -375,7 +376,13 @@ export default function App() {
             </div>
             <ParticipantsGroup participants={participants} />
           </Header>
-          <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <Content style={{
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            minHeight: 0,
+            flex: 1,
+          }}>
             <MessageList conv={currentConv} me={me} />
             <Composer onSend={send} disabled={!currentConv} />
           </Content>

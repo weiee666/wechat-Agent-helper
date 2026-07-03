@@ -11,7 +11,17 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { height: 100%; margin: 0; padding: 0; }
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;      /* 只让内部 scroll container 滚，不让整页滚 */
+}
+/* Semi Layout 内部的 flex 容器修正：min-height 默认 auto 会溢出 */
+.semi-layout, .semi-layout-content, .semi-layout-has-sider {
+  min-height: 0;
+  min-width: 0;
+}
 body {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro SC", "PingFang SC",
     "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;

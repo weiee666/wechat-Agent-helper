@@ -28,6 +28,7 @@ export default function Composer({ onSend, disabled }) {
       display: 'flex',
       gap: 8,
       alignItems: 'flex-end',
+      flexShrink: 0,
     }}>
       <TextArea
         value={text}
