@@ -544,6 +544,7 @@
         <div class="title" id="chatTitle">选择一个会话</div>
         <div class="subtitle" id="chatSubtitle"></div>
       </div>
+      <div class="participants" id="participants"></div>
     </div>
     <div class="chat-messages" id="chatMessages">
       <div class="chat-messages-inner" id="chatInner"></div>
@@ -568,6 +569,10 @@ const $chatInner = document.getElementById('chatInner');
 const $inputArea = document.getElementById('inputArea');
 const $panelInput = document.getElementById('panelInput');
 const $sendBtn = document.getElementById('sendBtn');
+const $participants = document.getElementById('participants');
+
+// 用户身份（bootstrap 时从 /session/{uid}/config 拿）
+let ME = { display_name: '', agent_name: '' };
 
 const params = new URLSearchParams(location.search);
 const token = params.get('token');
@@ -770,17 +775,19 @@ function renderChatArea() {
     $chatInner.innerHTML = '';
     $chatTitle.textContent = '选择一个会话';
     $chatSubtitle.textContent = '';
+    $participants.innerHTML = '';
     $inputArea.classList.remove('visible');
     return;
   }
   $chatTitle.textContent = conv.name;
+  // 短小 subtitle，只在必要时显示；不再显示 user_id 那种长串
   $chatSubtitle.textContent = conv.isTeacher
-    ? '苏格拉底式启发 + 费曼式简化解释（每用户独立记忆）'
+    ? '苏格拉底 + 费曼'
     : (conv.isClaude
-       ? 'Claude Code CLI（跑在你 Mac 上），需要本地 daemon 在线才能对话'
-       : (conv.isPair
-          ? '跨 Agent 对话（默认不打扰双方微信，只在此显示）'
-          : `观察对象：${userId}`));
+       ? '需要本地 daemon 在线'
+       : (conv.isPair ? '跨 Agent 对话（不打扰双方微信）' : ''));
+  // 右上角"群成员"头像
+  renderParticipants(conv);
   // 输入框对所有 tab 显示；placeholder 根据 conv 动态
   $inputArea.classList.add('visible');
   $panelInput.placeholder = conv.isTeacher
@@ -790,7 +797,10 @@ function renderChatArea() {
        : (conv.isPair
           ? `直接跟「${conv.name.split('↔').pop().trim()}」说一句（以你自己身份）`
           : '跟你的助手说...（回车发送，Shift+Enter 换行）'));
-  setTimeout(() => $panelInput.focus(), 100);
+  // 桌面自动 focus 便于打字；手机不自动 focus（避免自动弹键盘打扰）
+  if (!window.matchMedia('(max-width: 768px)').matches) {
+    setTimeout(() => $panelInput.focus(), 100);
+  }
   $chatInner.innerHTML = '';
   if (conv.items.length === 0) {
     const empty = document.createElement('div');
@@ -809,6 +819,51 @@ function renderChatArea() {
   requestAnimationFrame(() => {
     $chatMessages.scrollTop = $chatMessages.scrollHeight;
   });
+}
+
+// 通用逻辑：每个 conv 有一个 participants 列表（"谁在这个 channel 里"）
+// 结构：[{name: '危博', avatar: '👤', kind: 'me'}, {name: '小博', avatar: '🤖', kind: 'agent'}]
+function participantsOf(conv) {
+  const myName = ME.display_name || '我';
+  const myAgentName = ME.agent_name || '助手';
+  const me = { name: myName, avatar: '👤', kind: 'me' };
+  if (!conv) return [];
+  if (conv.id === 'self') {
+    return [me, { name: myAgentName, avatar: '🤖', kind: 'agent' }];
+  }
+  if (conv.id === 'teacher') {
+    return [me, { name: '老师', avatar: '👨‍🏫', kind: 'agent' }];
+  }
+  if (conv.id === 'claude') {
+    return [me, { name: 'Claude', avatar: '🤖', kind: 'agent' }];
+  }
+  if (conv.isPair) {
+    // pair conv 存了 otherName / myName（在 handleAgentConversation 里设置）
+    return [
+      { name: conv.myName || myAgentName, avatar: '🤖', kind: 'me' },
+      { name: conv.otherName || '对方助手', avatar: '🤖', kind: 'agent' },
+    ];
+  }
+  return [me];
+}
+
+function renderParticipants(conv) {
+  $participants.innerHTML = '';
+  const list = participantsOf(conv);
+  for (const p of list) {
+    const wrap = document.createElement('div');
+    wrap.className = 'participant';
+    wrap.title = p.name;
+    const circle = document.createElement('div');
+    circle.className = 'avatar-circle' + (p.kind === 'me' ? ' me' : '');
+    circle.textContent = p.avatar;
+    const name = document.createElement('div');
+    name.className = 'p-name';
+    name.textContent = p.name;
+    wrap.appendChild(circle);
+    wrap.appendChild(name);
+    $participants.appendChild(wrap);
+  }
 }
 
 function selectConversation(convId) {
@@ -1044,6 +1099,8 @@ function handleAgentConversation(data) {
       unread: 0,
       isPair: true,
       otherUid,
+      otherName,       // 通用逻辑：participantsOf 用
+      myName,          // 我方参与者名字（一般是我的助手）
       _pendingDetails: [],
     };
   }
@@ -1085,11 +1142,14 @@ renderChatArea();
       return;
     }
     cfg = await r.json();
+    if (cfg.me) ME = cfg.me;
   } catch (e) {
     showBanner(`❌ 连接后端失败：${e.message}`);
     setStatus('连接失败', 'error');
     return;
   }
+  // 用户身份拿到后再渲染一次，参与者头像才有名字
+  renderChatArea();
 
   // self 会话历史（用统一的 panel-history）
   loadConvHistory('self');

@@ -68,11 +68,18 @@ def session_config(user_id: str, token: str = ""):
         return err
     if not config.pusher_ready():
         return JSONResponse({"error": "Pusher 未配置"}, status_code=503)
+    # 附带用户身份（用于看板右上角显示"群成员"头像）
+    from app.core.memory.bot_users import BotUsersStore
+    me = BotUsersStore().get(user_id)
     return {
         "user_id": user_id,
         "pusher_key": config.PUSHER_KEY,
         "pusher_cluster": config.PUSHER_CLUSTER,
         "channel": realtime.channel_name(user_id),
+        "me": {
+            "display_name": me.display_name if me else "",
+            "agent_name": me.agent_name if me else "",
+        },
     }
 
 
