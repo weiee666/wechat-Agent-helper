@@ -230,22 +230,24 @@ def _stm_session_id(user_id: str) -> str:
     return f"claude:{user_id}"
 
 
-def handle(user_id: str, message: str) -> str:
+def handle(user_id: str, message: str, persist: bool = True) -> str:
     """同步入口（tools.call_agent 特殊路径 / panel_chat 调用）。
     per-user session 自动关联（第一次问 Claude 创建 session，后续用 --resume 接续）。
-    落 SQLite：session_id=claude:{uid}，方便看板拉历史。"""
+    persist=True: 落 claude:{uid} session（"跟 Claude 聊" tab 用）
+    persist=False: 不落（助手代问路径由 caller 落 pair 库）"""
     from app.core.memory.short_term import ShortTermMemory
     from app.models.enums import MessageRole
     from app.models.schemas import Message
 
     reply = hub.ask_sync(user_id, message)
-    try:
-        sid = _stm_session_id(user_id)
-        stm = ShortTermMemory()
-        stm.add_message(sid, Message(role=MessageRole.USER, content=message))
-        stm.add_message(sid, Message(role=MessageRole.ASSISTANT, content=reply or ""))
-    except Exception as e:  # noqa: BLE001
-        logger.warning("Claude 历史落库失败: %s", e)
+    if persist:
+        try:
+            sid = _stm_session_id(user_id)
+            stm = ShortTermMemory()
+            stm.add_message(sid, Message(role=MessageRole.USER, content=message))
+            stm.add_message(sid, Message(role=MessageRole.ASSISTANT, content=reply or ""))
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Claude 历史落库失败: %s", e)
     return reply
 
 

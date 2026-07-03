@@ -68,10 +68,14 @@ class TeacherAgent:
     """老师 Agent 单例。每次 handle_message 从 stm 读历史 → LLM → 存 turn 回 stm。"""
 
     def handle_message(self, user_id: str, text: str,
-                       publish_channel_events: bool = True) -> str:
+                       publish_channel_events: bool = True,
+                       persist: bool = True) -> str:
         """publish_channel_events:
           True（默认）：向 user 的 pusher channel 推 teacher_* 事件（看板 tab 直接对话时）
-          False：不推（助手代问时，避免污染看板 tab）"""
+          False：不推（助手代问时，避免污染看板 tab）
+        persist:
+          True（默认）：落 teacher:{uid} session（"跟老师聊" tab 用）
+          False：不落（助手代问路径由 caller 负责落 pair 库）"""
         text = (text or "").strip()
         if not text:
             return "（我在。你想问什么？）"
@@ -137,9 +141,10 @@ class TeacherAgent:
 
         reply = (reply or "").strip()
 
-        # 落库
-        stm.add_message(sid, Message(role=MessageRole.USER, content=text))
-        stm.add_message(sid, Message(role=MessageRole.ASSISTANT, content=reply))
+        # 落库（persist=False 时跳过，由 caller 落别的 session，如助手代问落 pair 库）
+        if persist:
+            stm.add_message(sid, Message(role=MessageRole.USER, content=text))
+            stm.add_message(sid, Message(role=MessageRole.ASSISTANT, content=reply))
 
         if publish_channel_events:
             realtime.publish(user_id, "teacher_reply", {"text": reply})
@@ -171,8 +176,11 @@ class TeacherAgent:
 _teacher = TeacherAgent()
 
 
-def handle(user_id: str, text: str, publish_channel_events: bool = True) -> str:
-    return _teacher.handle_message(user_id, text, publish_channel_events=publish_channel_events)
+def handle(user_id: str, text: str, publish_channel_events: bool = True,
+           persist: bool = True) -> str:
+    return _teacher.handle_message(user_id, text,
+                                   publish_channel_events=publish_channel_events,
+                                   persist=persist)
 
 
 def history(user_id: str) -> list[dict]:

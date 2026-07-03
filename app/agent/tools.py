@@ -118,12 +118,37 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         "text": message,
     })
 
+    def _persist_pair(sent_text: str, reply_text: str) -> None:
+        """落到 pair 共享 session_id，让"我的助手 ↔ 对方" tab 能拉到独立历史。"""
+        try:
+            from app.core.memory.short_term import ShortTermMemory
+            from app.models.enums import MessageRole
+            from app.models.schemas import Message
+            x, y = sorted([user_id, target.user_id])
+            pair_sid = f"pair:{x}|{y}"
+            stm = ShortTermMemory()
+            stm.add_message(pair_sid, Message(
+                role=MessageRole.USER, content=sent_text,
+                metadata={"from_user_id": user_id, "from_display_name": sender_display,
+                          "round": round_num},
+            ))
+            stm.add_message(pair_sid, Message(
+                role=MessageRole.USER, content=reply_text,
+                metadata={"from_user_id": target.user_id, "from_display_name": target_label,
+                          "round": round_num},
+            ))
+        except Exception as e:  # noqa: BLE001
+            import logging as _log
+            _log.getLogger(__name__).warning("pair 落库失败: %s", e)
+
     # 特殊路径：如果 target 是系统 Agent（如老师），走对应的 handler
     if target.user_id == "system:teacher":
         from app.agent import teacher as _teacher
         try:
             # 助手代问老师 → 不 publish 到用户的老师 tab（避免污染"跟老师聊"tab）
-            reply = _teacher.handle(user_id, message, publish_channel_events=False)
+            # persist=False：不落 teacher:{uid}，改落"助手↔老师"独立 pair 库
+            reply = _teacher.handle(user_id, message,
+                                    publish_channel_events=False, persist=False)
         except Exception as e:  # noqa: BLE001
             return f"[call_agent] 老师处理失败：{e}"
         reply = (reply or "").strip() or "（老师暂无回复）"
@@ -136,6 +161,7 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
             "to_user_id": user_id,
             "text": reply,
         })
+        _persist_pair(message, reply)
         return (f"「老师」回复：\n{reply}\n\n"
                 f"[提示] 老师用苏格拉底+费曼方法讲解。老师的回复中：\n"
                 f"- 如果是**解释**：请综合成一段自然的中文给你的用户\n"
@@ -147,7 +173,7 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         if not _claude.hub.is_online():
             return ("[call_agent] Claude 目前不在线：需要用户 Mac 上启动 claude_bridge daemon 连接过来。")
         try:
-            reply = _claude.handle(user_id, message)
+            reply = _claude.handle(user_id, message, persist=False)
         except Exception as e:  # noqa: BLE001
             return f"[call_agent] Claude 处理失败：{e}"
         reply = (reply or "").strip() or "（Claude 暂无回复）"
@@ -160,6 +186,7 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
             "to_user_id": user_id,
             "text": reply,
         })
+        _persist_pair(message, reply)
         return (f"「Claude」回复：\n{reply}\n\n"
                 f"[提示] Claude 是编程专家（跑在用户 Mac 上的 claude CLI）。请把它的回复"
                 f"综合成一段中文告诉用户；技术细节（命令、代码片段）保留原样。")
@@ -212,26 +239,7 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     })
 
     # ── 落 pair 对话 SQLite（双方看板 pair tab 都能拉到）──
-    try:
-        from app.core.memory.short_term import ShortTermMemory
-        from app.models.enums import MessageRole
-        from app.models.schemas import Message
-        x, y = sorted([user_id, target.user_id])
-        pair_sid = f"pair:{x}|{y}"
-        stm = ShortTermMemory()
-        stm.add_message(pair_sid, Message(
-            role=MessageRole.USER, content=message,
-            metadata={"from_user_id": user_id, "from_display_name": sender_display,
-                      "round": round_num},
-        ))
-        stm.add_message(pair_sid, Message(
-            role=MessageRole.USER, content=reply,
-            metadata={"from_user_id": target.user_id, "from_display_name": target_label,
-                      "round": round_num},
-        ))
-    except Exception as e:  # noqa: BLE001
-        import logging as _log
-        _log.getLogger(__name__).warning("call_agent pair 落库失败: %s", e)
+    _persist_pair(message, reply)
 
     return (f"「{target_label}」的助手回复：\n{reply}\n\n"
             f"[提示] 请综合对方回复给你的用户一个自然的中文回应。用户微信不会自动看到原文。"
