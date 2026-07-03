@@ -40,22 +40,46 @@ def die(msg: str, code: int = 1):
     sys.exit(code)
 
 
+def find_or_create_daemon_python() -> Path:
+    """找一个能跑 daemon 的 Python（依赖 websockets）。优先项目已有 venv；
+    没有就在 ~/.claude-bridge/venv 建一个专用 venv。返回 python 可执行文件路径。"""
+    project_root = Path(__file__).resolve().parent.parent
+    for name in (".venv", "venv"):
+        p = project_root / name / "bin" / "python3"
+        if p.exists():
+            print(f"✓ 用项目 venv: {p}")
+            return p
+    dedicated = Path.home() / ".claude-bridge" / "venv"
+    if not (dedicated / "bin" / "python3").exists():
+        print(f"建专用 venv: {dedicated}…")
+        subprocess.check_call([sys.executable, "-m", "venv", str(dedicated)])
+    return dedicated / "bin" / "python3"
+
+
+def ensure_websockets(python_bin: Path) -> None:
+    ok = subprocess.run(
+        [str(python_bin), "-c", "import websockets"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if ok:
+        return
+    print(f"装 websockets 到 {python_bin}…")
+    subprocess.check_call([str(python_bin), "-m", "pip", "install", "websockets"])
+
+
 def check_env():
     if platform.system() != "Darwin":
         die("这个脚本目前只支持 macOS（launchd 是 Mac 特有的）。Linux 用户可参考 scripts/claude_bridge.py 手动跑 + systemd。")
     if sys.version_info < (3, 11):
         die(f"Python 3.11+ 才行，你当前 {sys.version.split()[0]}。装个新的：brew install python@3.13")
-    try:
-        import websockets  # noqa: F401
-    except ImportError:
-        print("正在装 websockets…")
-        subprocess.check_call([sys.executable, "-m", "pip", "install", "--user", "websockets"])
+    python_bin = find_or_create_daemon_python()
+    ensure_websockets(python_bin)
     cli_path = shutil.which("claude")
     if not cli_path:
         print("⚠ PATH 里找不到 claude CLI（Claude Code 应用装的是 GUI，但也带 claude 命令）")
         print("  你可能需要在 Claude Code 应用里设置 → Enable 'claude' CLI 才能生效")
         cli_path = input("  或者输入 claude 可执行文件的绝对路径（回车跳过用默认 'claude'）: ").strip() or "claude"
-    return cli_path
+    return cli_path, python_bin
 
 
 def prompt_api_key():
@@ -139,7 +163,7 @@ def main():
     print("claude_bridge 后台服务安装")
     print("=" * 60)
 
-    cli_path = check_env()
+    cli_path, python_bin = check_env()
     api_key = prompt_api_key()
 
     cfg_dir = Path.home() / ".claude-bridge"
@@ -149,7 +173,7 @@ def main():
     if not script_path.exists():
         die(f"找不到 claude_bridge.py：{script_path}")
     plist_dir = Path.home() / "Library" / "LaunchAgents"
-    plist_path = write_plist(plist_dir, sys.executable, script_path, cfg_dir)
+    plist_path = write_plist(plist_dir, str(python_bin), script_path, cfg_dir)
 
     print()
     print("启动 daemon…")
