@@ -195,6 +195,8 @@ export default function App() {
       const data = await api.getHistory(userId, token, convId, 50)
       const conv = convsRef.current[convId]
       if (!conv || !data.messages) return
+      // 后端返回空但本地已有实时收到的消息：不覆盖，保留内存里那批
+      if (data.messages.length === 0 && conv.items && conv.items.length > 0) return
       const items = data.messages.map((m) => {
         let kind, agentName
         if (conv.kind === 'pair') {
@@ -294,11 +296,13 @@ export default function App() {
     const myName = data.from_user_id === userId ? data.from : data.to
     const convId = `pair-${otherUid}`
     if (!convsRef.current[convId]) {
+      // 实时创建的 pair 直接标 historyLoaded：消息本身就是实时来的，
+      // 用户点 tab 时不用再拉后端历史（避免空数组覆盖内存里的实时消息）
       upsertConv(convId, {
         id: convId, kind: 'pair',
         name: `${myName || '我的助手'} ↔ ${otherName}`,
         otherUid, otherName, myName,
-        items: [], unread: 0, _pendingDetails: [], historyLoaded: false,
+        items: [], unread: 0, _pendingDetails: [], historyLoaded: true,
       })
     }
     const isMineOut = data.from_user_id === userId
