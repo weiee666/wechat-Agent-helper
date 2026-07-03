@@ -441,25 +441,23 @@
     .sidebar {
       width: 100%;
       border-right: none;
-      position: absolute;
-      top: 0; left: 0; bottom: 0;
       z-index: 5;
-      transition: transform 0.25s ease;
       background: var(--bg-side);
       padding-top: env(safe-area-inset-top);
+      display: flex;  /* 覆盖桌面 flex，保证显示 */
     }
-    .wechat-layout.chat-open .sidebar {
-      transform: translateX(-100%);
-    }
+    /* 手机默认：只显示 sidebar，chat-area 完全隐藏（display none 而非 transform，
+       避免首次加载时"半个屏幕"的视觉 bug） */
     .chat-area {
+      display: none;
       width: 100%;
-      transition: transform 0.25s ease;
     }
-    .wechat-layout .chat-area {
-      transform: translateX(100%);
+    /* chat-open 时：只显示 chat-area，sidebar 隐藏 */
+    .wechat-layout.chat-open .sidebar {
+      display: none;
     }
     .wechat-layout.chat-open .chat-area {
-      transform: translateX(0);
+      display: flex;
     }
     .back-btn { display: inline-flex; align-items: center; }
     .chat-header {
@@ -592,7 +590,7 @@ const conversations = {
   },
   teacher: {
     id: 'teacher',
-    name: '跟老师聊',
+    name: '老师 Agent',
     icon: '👨‍🏫',
     items: [],
     unread: 0,
@@ -603,12 +601,13 @@ const conversations = {
   },
   claude: {
     id: 'claude',
-    name: '跟 Claude 聊',
+    name: 'Claude',
     icon: '🤖',
     items: [],
     unread: 0,
     isPair: false,
     isClaude: true,
+    historyLoaded: false,
     _pendingDetails: [],
   },
 };
@@ -1085,21 +1084,8 @@ renderChatArea();
     return;
   }
 
-  // 历史
-  try {
-    const r = await fetch(`${API}/history?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}&limit=50`);
-    if (r.ok) {
-      const data = await r.json();
-      if (data.messages && data.messages.length) {
-        for (const m of data.messages) {
-          const kind = m.role === 'assistant' ? 'assistant' : (m.role === 'system' ? 'system' : 'user');
-          conversations.self.items.push({ kind, text: m.content, time: Date.now(), historical: true });
-        }
-        renderChatArea();
-        renderSidebar();
-      }
-    }
-  } catch (e) { console.warn('历史加载失败', e); }
+  // self 会话历史（用统一的 panel-history）
+  loadConvHistory('self');
 
   const pusher = new Pusher(cfg.pusher_key, {
     cluster: cfg.pusher_cluster,

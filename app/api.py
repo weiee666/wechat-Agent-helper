@@ -128,6 +128,35 @@ async def teacher_chat(request: Request):
     return {"reply": reply}
 
 
+@app.get("/panel/history")
+def panel_history(user_id: str = "", token: str = "", conv_id: str = "", limit: int = 50):
+    """看板通用历史接口。一段代码搞定所有 tab。
+    conv_id:
+      - 'self'          → stm_messages WHERE session_id=user_id
+      - 'teacher'       → stm_messages WHERE session_id='teacher:{user_id}'
+      - 'claude'        → 暂不落库，返回空
+      - 'pair-{other}'  → 暂不落库，返回空
+    """
+    err = _auth_or_401(user_id, token)
+    if err:
+        return err
+    if conv_id == "self":
+        session_id = user_id
+    elif conv_id == "teacher":
+        session_id = f"teacher:{user_id}"
+    else:
+        return {"messages": []}
+    from app.core.memory.short_term import ShortTermMemory
+    msgs = ShortTermMemory().get_history(session_id)
+    tail = msgs[-limit:] if len(msgs) > limit else msgs
+    return {
+        "messages": [
+            {"role": m.role.value, "content": m.content, "metadata": m.metadata}
+            for m in tail
+        ],
+    }
+
+
 @app.post("/panel/chat")
 async def panel_chat(request: Request):
     """看板通用聊天入口。body: {user_id, token, conv_id, message}
