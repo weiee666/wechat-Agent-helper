@@ -2,7 +2,11 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="format-detection" content="telephone=no">
 <title>weixin-agent 旁观面板</title>
 <script src="https://js.pusher.com/8.2/pusher.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -24,7 +28,7 @@
     --sidebar-w: 260px;
     --avatar-size: 34px;
   }
-  * { box-sizing: border-box; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { height: 100%; margin: 0; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -32,10 +36,24 @@
     color: var(--text);
     line-height: 1.5;
     overflow: hidden;
+    -webkit-text-size-adjust: 100%;
   }
   .wechat-layout {
     display: flex;
     height: 100vh;
+    height: 100dvh;  /* iOS Safari 兼容 */
+  }
+  /* 手机上聊天视图打开时，body 加 chat-open 类 */
+  .back-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    font-size: 20px;
+    padding: 4px 12px 4px 0;
+    cursor: pointer;
+    color: var(--text);
+    line-height: 1;
+    margin-right: 4px;
   }
   /* ── 左侧栏 ─────────────────────────── */
   .sidebar {
@@ -418,6 +436,66 @@
     text-align: center;
     padding: 6px 0 0 0;
   }
+  /* ── 响应式：手机（< 768px）单栏切换 ─────────────── */
+  @media (max-width: 768px) {
+    .sidebar {
+      width: 100%;
+      border-right: none;
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      z-index: 5;
+      transition: transform 0.25s ease;
+      background: var(--bg-side);
+      padding-top: env(safe-area-inset-top);
+    }
+    .wechat-layout.chat-open .sidebar {
+      transform: translateX(-100%);
+    }
+    .chat-area {
+      width: 100%;
+      transition: transform 0.25s ease;
+    }
+    .wechat-layout .chat-area {
+      transform: translateX(100%);
+    }
+    .wechat-layout.chat-open .chat-area {
+      transform: translateX(0);
+    }
+    .back-btn { display: inline-flex; align-items: center; }
+    .chat-header {
+      padding: 12px 14px calc(12px + env(safe-area-inset-top)) 14px;
+      padding-top: max(12px, env(safe-area-inset-top));
+    }
+    .chat-header .title { font-size: 15px; }
+    .chat-header .subtitle { font-size: 11px; }
+    .chat-messages {
+      padding: 12px 12px calc(12px + env(safe-area-inset-bottom)) 12px;
+    }
+    .chat-messages-inner { max-width: 100%; }
+    .msg .body { max-width: 78%; }
+    .msg .bubble {
+      font-size: 15px;  /* 手机稍大 */
+    }
+    .conv-item { padding: 14px 16px; }
+    .conv-item .name { font-size: 15px; }
+    .conv-item .preview { font-size: 13px; }
+    .conv-item .avatar {
+      width: 40px; height: 40px; font-size: 20px;
+    }
+    .sidebar-header {
+      padding: 14px 16px;
+      padding-top: max(14px, env(safe-area-inset-top));
+    }
+    .chat-input-area {
+      padding: 10px 12px calc(12px + env(safe-area-inset-bottom)) 12px;
+    }
+    .chat-input-area textarea {
+      font-size: 16px;  /* iOS 防自动缩放 */
+    }
+    /* details 折叠面板手机上字号 */
+    .details-toggle { font-size: 12px; padding: 4px 10px; }
+  }
+
   /* 输入中的"..."气泡 */
   .typing-bubble {
     display: inline-flex;
@@ -463,7 +541,8 @@
   </aside>
   <section class="chat-area">
     <div class="chat-header">
-      <div>
+      <button class="back-btn" id="backBtn" aria-label="返回">‹</button>
+      <div style="flex:1; min-width:0;">
         <div class="title" id="chatTitle">选择一个会话</div>
         <div class="subtitle" id="chatSubtitle"></div>
       </div>
@@ -481,6 +560,9 @@
 <script>
 const $status = document.getElementById('status');
 const $convList = document.getElementById('convList');
+const $backBtn = document.getElementById('backBtn');
+const $layout = document.querySelector('.wechat-layout');
+const IS_MOBILE = window.matchMedia('(max-width: 768px)').matches;
 const $chatTitle = document.getElementById('chatTitle');
 const $chatSubtitle = document.getElementById('chatSubtitle');
 const $chatMessages = document.getElementById('chatMessages');
@@ -741,6 +823,20 @@ function selectConversation(convId) {
   }
   renderSidebar();
   renderChatArea();
+  // 手机上：切换到聊天视图
+  if (window.matchMedia('(max-width: 768px)').matches) {
+    $layout.classList.add('chat-open');
+  }
+}
+
+// 返回按钮：手机上从聊天视图回到会话列表
+$backBtn.addEventListener('click', () => {
+  $layout.classList.remove('chat-open');
+});
+
+// 初始：手机上默认显示会话列表（不进任何 chat）
+if (window.matchMedia('(max-width: 768px)').matches) {
+  $layout.classList.remove('chat-open');
 }
 
 async function loadTeacherHistory() {
