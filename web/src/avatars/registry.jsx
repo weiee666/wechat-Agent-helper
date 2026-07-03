@@ -1,19 +1,46 @@
-import UserAvatar from './UserAvatar.jsx'
-import BotAvatar from './BotAvatar.jsx'
-import TeacherAvatar from './TeacherAvatar.jsx'
-import ClaudeAvatar from './ClaudeAvatar.jsx'
+// 用外部 CDN 头像替换手画 SVG。
+// - DiceBear（notionists-neutral / bottts-neutral 风格 + 稳定 seed + 渐变背景色区分角色）
+// - Claude 用 Anthropic 官方 apple-touch-icon
+// - 加载失败降级为纯色圆 + 首字母
 
-// 角色 → 头像组件。size 传入 render 时决定。
-export const AvatarByRole = {
-  user: UserAvatar,
-  bot: BotAvatar,        // 助手
-  teacher: TeacherAvatar,
-  claude: ClaudeAvatar,
-  // pair 场景对方助手默认用 bot
-  peer_bot: BotAvatar,
+const AVATAR_URL = {
+  user:     'https://api.dicebear.com/9.x/notionists-neutral/svg?seed=Weibo&backgroundColor=b6e3f4,c0aede,ffd5dc&backgroundType=gradientLinear',
+  bot:      'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Assistant&backgroundColor=00d6b9,4ecdc4&backgroundType=gradientLinear',
+  teacher:  'https://api.dicebear.com/9.x/notionists-neutral/svg?seed=Professor&backgroundColor=c084fc,a78bfa&backgroundType=gradientLinear',
+  claude:   'https://claude.ai/apple-touch-icon.png',
+  peer_bot: 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Peer&backgroundColor=fca5a5,f87171&backgroundType=gradientLinear',
+}
+
+const FALLBACK_BG = {
+  user: '#3370FF',
+  bot: '#00A0C4',
+  teacher: '#8B5CF6',
+  claude: '#D97757',
+  peer_bot: '#F87171',
 }
 
 export function renderAvatar(role, size = 32) {
-  const Comp = AvatarByRole[role] || BotAvatar
-  return <Comp size={size} />
+  const url = AVATAR_URL[role] || AVATAR_URL.bot
+  const bg = FALLBACK_BG[role] || FALLBACK_BG.bot
+  return (
+    <img
+      src={url}
+      alt={role}
+      width={size}
+      height={size}
+      style={{
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        display: 'block',
+        objectFit: 'cover',
+        background: bg,
+      }}
+      referrerPolicy="no-referrer"
+      loading="lazy"
+    />
+  )
 }
+
+// 兼容旧 API（避免 breakage）
+export const AvatarByRole = {}
