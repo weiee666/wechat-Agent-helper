@@ -5,6 +5,7 @@
   "framework": "vite",
   "rewrites": [
     { "source": "/dashboard.html", "destination": "/" },
-    { "source": "/dashboard", "destination": "/" }
+    { "source": "/dashboard", "destination": "/" },
+    { "source": "/connect", "destination": "/connect.html" }
   ]
 }
