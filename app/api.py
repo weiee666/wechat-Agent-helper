@@ -62,7 +62,10 @@ def _auth_or_401(user_id: str, token: str):
 
 @app.get("/session/{user_id}/config")
 def session_config(user_id: str, token: str = ""):
-    """前端 bootstrap：确认 token 合法 + 返回 Pusher 公开 key/cluster 让浏览器初始化。"""
+    """前端 bootstrap：确认 token 合法 + 返回 Pusher 公开 key/cluster 让浏览器初始化。
+
+    顺便签发一枚新 token 塞进 refresh_token 字段：前端应用于覆盖 localStorage
+    → 每次 config 调用等效滑动续期到当前时刻 + 7 天。"""
     err = _auth_or_401(user_id, token)
     if err:
         return err
@@ -71,11 +74,14 @@ def session_config(user_id: str, token: str = ""):
     # 附带用户身份（用于看板右上角显示"群成员"头像）
     from app.core.memory.bot_users import BotUsersStore
     me = BotUsersStore().get(user_id)
+    # 滑动续期：不管当前 token 剩多久，直接签一枚新的返回，前端覆盖 localStorage
+    refresh_token = dashboard_tokens.issue(user_id)
     return {
         "user_id": user_id,
         "pusher_key": config.PUSHER_KEY,
         "pusher_cluster": config.PUSHER_CLUSTER,
         "channel": realtime.channel_name(user_id),
+        "refresh_token": refresh_token,
         "me": {
             "display_name": me.display_name if me else "",
             "agent_name": me.agent_name if me else "",

@@ -11,9 +11,40 @@ import ParticipantsGroup from './components/ParticipantsGroup.jsx'
 const { Header, Sider, Content } = Layout
 const { Title, Text } = Typography
 
-const params = new URLSearchParams(location.search)
-const userId = params.get('user_id') || ''
-const token = params.get('token') || ''
+// token / user_id 优先级：URL 参数 > localStorage
+// URL 拿到后立刻清 URL + 存 localStorage 供下次刷新
+const LS_KEY = 'weixin-dashboard-auth'
+function readAuth() {
+  const p = new URLSearchParams(location.search)
+  const uidParam = p.get('user_id')
+  const tokenParam = p.get('token')
+  if (uidParam && tokenParam) {
+    const auth = { user_id: uidParam, token: tokenParam }
+    try { localStorage.setItem(LS_KEY, JSON.stringify(auth)) } catch {}
+    try { history.replaceState(null, '', location.pathname + location.hash) } catch {}
+    return auth
+  }
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch {}
+  return { user_id: '', token: '' }
+}
+function saveToken(newToken) {
+  if (!newToken) return
+  try {
+    const raw = localStorage.getItem(LS_KEY)
+    const cur = raw ? JSON.parse(raw) : {}
+    cur.token = newToken
+    localStorage.setItem(LS_KEY, JSON.stringify(cur))
+  } catch {}
+}
+function clearAuth() {
+  try { localStorage.removeItem(LS_KEY) } catch {}
+}
+const initial = readAuth()
+let userId = initial.user_id
+let token = initial.token
 
 export default function App() {
   const [me, setMe] = useState({ display_name: '', agent_name: '' })
@@ -72,6 +103,8 @@ export default function App() {
       try {
         const cfg = await api.getConfig(userId, token)
         if (cfg.me) setMe(cfg.me)
+        // 滑动续期：把服务器新签的 token 存 localStorage，下次刷新页面就是新有效期
+        if (cfg.refresh_token) saveToken(cfg.refresh_token)
 
         // 拉 tab 列表：恢复 pair conv
         const convsData = await api.getConversations(userId, token)
@@ -102,7 +135,12 @@ export default function App() {
         cleanup = sub.cleanup
       } catch (e) {
         console.error(e)
-        setError(e.message || String(e))
+        // 鉴权失败：清 localStorage 避免用死的 token 反复重试
+        const msg = String(e.message || e)
+        if (msg.includes('token') || msg.includes('鉴权') || msg.includes('401')) {
+          clearAuth()
+        }
+        setError(msg)
       }
     })()
     return () => { if (cleanup) cleanup() }
