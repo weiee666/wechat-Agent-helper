@@ -1,0 +1,24 @@
+{
+  "name": "weixin-dashboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@douyinfe/semi-icons": "^2.72.0",
+    "@douyinfe/semi-ui": "^2.72.0",
+    "dompurify": "^3.1.6",
+    "marked": "^13.0.3",
+    "pusher-js": "^8.4.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.10"
+  }
+}

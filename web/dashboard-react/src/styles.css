@@ -1,0 +1,45 @@
+/* 飞书美学基色 + 微信绿气泡（保留）+ 布局默认 */
+:root {
+  --bg-chat: #f4f5f7;
+  --bg-side: #fafbfc;
+  --bg-header: #ffffff;
+  --bubble-me: #3370FF;         /* 飞书主蓝 */
+  --bubble-other: #ffffff;
+  --semi-color-primary: #3370FF;
+  --semi-color-primary-hover: #245BDB;
+  --semi-color-primary-active: #1B4EDB;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro SC", "PingFang SC",
+    "Helvetica Neue", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  color: var(--semi-color-text-0);
+  background: var(--bg-chat);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 主区 markdown 里的元素 */
+.chat-md p { margin: 0; }
+.chat-md ul, .chat-md ol { margin: 4px 0; padding-left: 20px; }
+.chat-md pre {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 8px 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.chat-md code {
+  background: rgba(0, 0, 0, 0.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+.chat-md a { color: #3370FF; }
+
+/* 移动端 */
+@media (max-width: 768px) {
+  .semi-layout-sider { width: 100% !important; flex: none !important; }
+}
