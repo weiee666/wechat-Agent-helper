@@ -362,8 +362,12 @@ export default function App() {
           maxWidth: isMobile ? '100%' : 280,
         }}>
           <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--semi-color-border)' }}>
-            <Title heading={5} style={{ margin: 0, fontSize: 16 }}>会话</Title>
-            <Text size="small" type="tertiary">{me.display_name || userId}</Text>
+            <Title heading={5} style={{ margin: 0, fontSize: 16 }}>
+              会话（{Object.keys(conversations).length}）
+            </Title>
+            <Text size="small" type="tertiary">
+              {me.display_name || userId} · pair {Object.values(conversations).filter(c => c.kind === 'pair').length}
+            </Text>
           </div>
           <Sidebar
             conversations={conversations}
