@@ -84,15 +84,24 @@ def clear_session(user_id: str) -> None:
 class TeacherAgent:
     """老师 Agent 单例。每次 handle_message 找 user 的 session，跑 LLM tool loop。"""
 
-    def handle_message(self, user_id: str, text: str) -> str:
+    def handle_message(self, user_id: str, text: str,
+                       publish_channel_events: bool = True) -> str:
         """用户对老师说 text，返回老师的 reply。
-        中间过程通过 realtime 推 teacher_thinking / teacher_tool_call / teacher_tool_out 事件到用户 channel。"""
+
+        publish_channel_events:
+          True（默认）：向 user 的 pusher channel 推 teacher_user_message /
+            teacher_reply / teacher_thinking / teacher_tool_call / teacher_tool_out 事件。
+            用于用户在看板"跟老师聊"tab 直接对话的场景 → 前端能看到实时事件流。
+          False：不推任何事件到 user channel。用于助手代问（call_agent → teacher）的场景，
+            避免污染用户的"跟老师聊"tab（那里应该只显示用户自己直接对老师说的话）。
+        """
         text = (text or "").strip()
         if not text:
             return "（我在。你想问什么？）"
 
-        # 推 user 消息事件（前端渲染需要）
-        realtime.publish(user_id, "teacher_user_message", {"text": text})
+        # 推 user 消息事件（前端渲染需要），仅在直接对话时
+        if publish_channel_events:
+            realtime.publish(user_id, "teacher_user_message", {"text": text})
 
         session = get_or_create_session(user_id)
         with _sessions_lock:
@@ -108,6 +117,8 @@ class TeacherAgent:
         by_name = _teacher_tools_by_name()
 
         def _emit(kind: str, txt: str):
+            if not publish_channel_events:
+                return
             s = str(txt).strip()
             if not s:
                 return
@@ -155,7 +166,8 @@ class TeacherAgent:
             session.messages.append(AIMessage(content=reply))
             session.updated_at = time.time()
 
-        realtime.publish(user_id, "teacher_reply", {"text": reply})
+        if publish_channel_events:
+            realtime.publish(user_id, "teacher_reply", {"text": reply})
         return reply
 
     def get_history(self, user_id: str) -> list[dict]:
@@ -179,9 +191,11 @@ class TeacherAgent:
 _teacher = TeacherAgent()
 
 
-def handle(user_id: str, text: str) -> str:
-    """入口函数，供 API 层调用。"""
-    return _teacher.handle_message(user_id, text)
+def handle(user_id: str, text: str, publish_channel_events: bool = True) -> str:
+    """入口函数，供 API 层调用。
+    publish_channel_events=True: 用户直接在看板"跟老师聊"tab 对话（默认）
+    publish_channel_events=False: 助手代问（call_agent 特殊路径），不要污染用户 tab"""
+    return _teacher.handle_message(user_id, text, publish_channel_events=publish_channel_events)
 
 
 def history(user_id: str) -> list[dict]:

@@ -122,7 +122,8 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
     if target.user_id == "system:teacher":
         from app.agent import teacher as _teacher
         try:
-            reply = _teacher.handle(user_id, message)
+            # 助手代问老师 → 不 publish 到用户的老师 tab（避免污染"跟老师聊"tab）
+            reply = _teacher.handle(user_id, message, publish_channel_events=False)
         except Exception as e:  # noqa: BLE001
             return f"[call_agent] 老师处理失败：{e}"
         reply = (reply or "").strip() or "（老师暂无回复）"
