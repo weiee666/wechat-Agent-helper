@@ -281,7 +281,7 @@ async def panel_chat(request: Request):
             reply = teacher.handle(user_id, message)
             return {"reply": reply}
 
-        # ── claude：走 claude_agent.handle（需 Mac daemon 在线）──
+        # ── claude：走 claude_agent hub.ask_async（await，避免死锁自己的 event loop）──
         if conv_id == "claude":
             from app.agent import claude_agent
             if not claude_agent.hub.is_online():
@@ -291,10 +291,22 @@ async def panel_chat(request: Request):
                 )
             realtime.publish(user_id, "claude_user_message", {"text": message})
             try:
-                reply = claude_agent.handle(user_id, message)
+                reply = await claude_agent.hub.ask_async(user_id, message)
             except Exception as e:  # noqa: BLE001
-                _log.getLogger(__name__).exception("claude_agent.handle 失败")
+                _log.getLogger(__name__).exception("claude ask_async 失败")
                 return JSONResponse({"error": f"Claude 处理失败: {e}"}, status_code=500)
+            reply = (reply or "").strip()
+            # 落库 stm_messages(session_id=claude:{uid})
+            try:
+                from app.core.memory.short_term import ShortTermMemory
+                from app.models.enums import MessageRole
+                from app.models.schemas import Message
+                stm = ShortTermMemory()
+                sid = f"claude:{user_id}"
+                stm.add_message(sid, Message(role=MessageRole.USER, content=message))
+                stm.add_message(sid, Message(role=MessageRole.ASSISTANT, content=reply))
+            except Exception as e:  # noqa: BLE001
+                _log.getLogger(__name__).warning("Claude 历史落库失败: %s", e)
             realtime.publish(user_id, "claude_reply", {"text": reply})
             return {"reply": reply}
 
@@ -421,7 +433,7 @@ async def claude_bridge_ws(ws: WebSocket, api_key: str = ""):
         import logging as _log
         _log.getLogger(__name__).warning("Claude WS 异常: %s", e)
     finally:
-        _claude.hub.detach()
+        _claude.hub.detach(ws)
 
 
 @app.post("/pusher/auth")

@@ -59,7 +59,10 @@ class ClaudeAgentHub:
 
     # ── WS 连接管理（FastAPI WebSocket handler 调用）──
     def attach(self, ws, loop) -> None:
-        """WS 连上后调。ws 是 starlette.websockets.WebSocket。"""
+        """WS 连上后调。ws 是 starlette.websockets.WebSocket。
+        如果之前已有活跃连接（并发或旧的），把旧的换掉但不 mark_offline
+        （新 daemon 来替换旧 daemon 是正常情形，不算离线）。"""
+        prev = self._ws
         self._ws = ws
         self._ws_loop = loop
         if self._queue is None or self._queue._loop is not loop:  # type: ignore
@@ -72,10 +75,18 @@ class ClaudeAgentHub:
             BotUsersStore().mark_system_online("system:claude")
         except Exception as e:  # noqa: BLE001
             logger.warning("mark Claude online 失败: %s", e)
-        logger.info("Claude bridge WS 已连接")
+        if prev is not None and prev is not ws:
+            logger.info("Claude bridge 有新连接接管，旧 WS 让位（不置 offline）")
+        else:
+            logger.info("Claude bridge WS 已连接")
 
-    def detach(self) -> None:
-        """WS 断开时调。"""
+    def detach(self, ws=None) -> None:
+        """WS 断开时调。ws 传当前断开的对象，只在它就是"当前主 WS"时才置 offline；
+        否则说明是被更新连接替换掉的旧连接，静默清理。"""
+        if ws is not None and self._ws is not None and ws is not self._ws:
+            # 旧连接被新连接顶掉后自然断开 —— 保持 online 状态
+            logger.info("Claude bridge 旧 WS 断开（已被新连接接管，忽略）")
+            return
         self._ws = None
         # 未完成的 future 全部 fail
         for tid, p in list(self._pending.items()):
