@@ -815,10 +815,10 @@ function selectConversation(convId) {
   currentConvId = convId;
   const conv = conversations[convId];
   if (conv) conv.unread = 0;
-  // 老师会话第一次打开时拉历史
-  if (conv && conv.isTeacher && !conv.historyLoaded) {
+  // 首次打开非 self 会话时按需拉历史（走同一个统一 API）
+  if (conv && !conv.historyLoaded && (conv.isTeacher || conv.isClaude)) {
     conv.historyLoaded = true;
-    loadTeacherHistory();
+    loadConvHistory(convId);
   }
   renderSidebar();
   renderChatArea();
@@ -838,20 +838,27 @@ if (window.matchMedia('(max-width: 768px)').matches) {
   $layout.classList.remove('chat-open');
 }
 
-async function loadTeacherHistory() {
+// 通用历史加载（所有 tab 走同一段代码 + 同一个端点）
+async function loadConvHistory(convId) {
   try {
-    const r = await fetch(`${API}/teacher-history?uid=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}`);
+    const r = await fetch(
+      `${API}/panel-history?uid=${encodeURIComponent(userId)}` +
+      `&token=${encodeURIComponent(token)}` +
+      `&conv_id=${encodeURIComponent(convId)}&limit=50`
+    );
     if (!r.ok) return;
     const data = await r.json();
     if (!data.messages || !data.messages.length) return;
-    const conv = conversations.teacher;
+    const conv = conversations[convId];
+    if (!conv) return;
     for (const m of data.messages) {
-      const kind = m.role === 'assistant' ? 'assistant' : 'user';
+      const kind = m.role === 'assistant' ? 'assistant'
+                 : (m.role === 'system' ? 'system' : 'user');
       conv.items.push({ kind, text: m.content, time: Date.now(), historical: true });
     }
-    if (currentConvId === 'teacher') renderChatArea();
+    if (currentConvId === convId) renderChatArea();
     renderSidebar();
-  } catch (e) { console.warn('老师历史加载失败', e); }
+  } catch (e) { console.warn(`${convId} 历史加载失败`, e); }
 }
 
 let _typingBubbleEl = null;
