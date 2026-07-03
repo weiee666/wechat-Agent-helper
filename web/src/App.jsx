@@ -119,28 +119,57 @@ export default function App() {
         // 滑动续期：把服务器新签的 token 存 localStorage，下次刷新页面就是新有效期
         if (cfg.refresh_token) saveToken(cfg.refresh_token)
 
-        // 拉 tab 列表：恢复 pair conv
+        // 一次性构建完整的 conversations dict（默认三个 tab + 落库过的 pair）
         const convsData = await api.getConversations(userId, token)
         const list = convsData.conversations || []
+        const initialConvs = defaultConversations()
         for (const tab of list) {
           if (tab.kind !== 'pair') continue
-          const cid = tab.conv_id
-          upsertConv(cid, {
-            id: cid,
+          initialConvs[tab.conv_id] = {
+            id: tab.conv_id,
             kind: 'pair',
             name: `${cfg.me?.agent_name || '我的助手'} ↔ ${tab.other_display_name || tab.other_user_id}`,
             otherUid: tab.other_user_id,
             otherName: tab.other_display_name,
             myName: cfg.me?.agent_name || '我的助手',
-            items: [],
-            unread: 0,
-            _pendingDetails: [],
+            items: [], unread: 0, _pendingDetails: [],
             historyLoaded: false,
-          })
+          }
         }
 
-        // 先拉 self 历史
-        await loadConvHistory('self')
+        // 并行预加载所有 tab 的历史（self / teacher / claude / 每个 pair）
+        const allConvIds = Object.keys(initialConvs)
+        const historyResults = await Promise.all(
+          allConvIds.map(async (cid) => {
+            try {
+              const data = await api.getHistory(userId, token, cid, 50)
+              return [cid, data.messages || []]
+            } catch {
+              return [cid, []]
+            }
+          })
+        )
+
+        // 一次性把所有历史合并进 state，之后 tab 切换零延迟
+        const finalConvs = { ...initialConvs }
+        for (const [cid, messages] of historyResults) {
+          const conv = finalConvs[cid]
+          if (!conv) continue
+          const items = messages.map((m) => {
+            let kind, agentName
+            if (conv.kind === 'pair') {
+              const from = m.metadata?.from_user_id || ''
+              kind = from === userId ? 'agent_out' : 'agent_in'
+              agentName = m.metadata?.from_display_name
+            } else {
+              kind = m.role === 'assistant' ? 'assistant'
+                   : m.role === 'system' ? 'system' : 'user'
+            }
+            return { kind, text: m.content, time: Date.now(), historical: true, agentName }
+          })
+          finalConvs[cid] = { ...conv, items, historyLoaded: true }
+        }
+        setConversations(finalConvs)
         setReady(true)
 
         // 订阅 pusher
