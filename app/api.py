@@ -106,9 +106,7 @@ def teacher_history(user_id: str = "", token: str = ""):
 
 @app.post("/teacher/chat")
 async def teacher_chat(request: Request):
-    """看板输入框发消息给老师。body: {user_id, token, message}。
-    老师处理是**同步**的（tool loop 里可能调 web_search，也就是几秒）；
-    过程中通过 realtime 推 teacher_* 事件到 user 的 Pusher channel。"""
+    """向后兼容：老看板版本用这个端点。新版本请用 /panel/chat with conv_id='teacher'。"""
     body = await request.json()
     user_id = body.get("user_id") or ""
     token = body.get("token") or ""
@@ -127,6 +125,116 @@ async def teacher_chat(request: Request):
         _log.getLogger(__name__).exception("teacher.handle 失败")
         return JSONResponse({"error": f"老师处理失败: {e}"}, status_code=500)
     return {"reply": reply}
+
+
+@app.post("/panel/chat")
+async def panel_chat(request: Request):
+    """看板通用聊天入口。body: {user_id, token, conv_id, message}
+    conv_id:
+      - 'self'          → 走 runner.handle_text（跟微信一样，但不通过 iLink 发出，只走 realtime）
+      - 'teacher'       → 走 teacher.handle
+      - 'pair-{other}'  → 以自己身份给对方 Agent 直接发消息（走 handle_agent_message）
+    """
+    import logging as _log
+    body = await request.json()
+    user_id = body.get("user_id") or ""
+    token = body.get("token") or ""
+    conv_id = body.get("conv_id") or ""
+    message = (body.get("message") or "").strip()
+    err = _auth_or_401(user_id, token)
+    if err:
+        return err
+    if not message:
+        return JSONResponse({"error": "message 不能空"}, status_code=400)
+
+    _EVENT = {"thinking": "verbose_thinking",
+              "tool_call": "verbose_tool_call",
+              "tool_out": "verbose_tool_out"}
+
+    try:
+        # ── self：走跟微信一样的 handle_text 但不 push 到 iLink ──
+        if conv_id == "self":
+            from app.agent.runner import VoiceTaskAgent
+
+            def _wechat_emit(_t):  # 从看板触发的对话，不 push 回 iLink
+                pass
+
+            def _realtime_emit(kind, text):
+                event = _EVENT.get(kind, "verbose")
+                realtime.publish(user_id, event, {"text": text})
+
+            # 前端已经 optimistic 显示了用户消息，仍然推一次给面板一致性
+            realtime.publish(user_id, "user_message", {"text": message})
+            result = VoiceTaskAgent().handle_text(
+                text=message, user_id=user_id,
+                emit=_wechat_emit, realtime_emit=_realtime_emit,
+            )
+            reply = (result.reply or "").strip()
+            if reply and result.send:
+                realtime.publish(user_id, "assistant_reply", {"text": reply})
+            return {"reply": reply}
+
+        # ── teacher：走 teacher.handle ──
+        if conv_id == "teacher":
+            from app.agent import teacher
+            reply = teacher.handle(user_id, message)
+            return {"reply": reply}
+
+        # ── pair-{other_uid}：直接给对方 Agent 发一条消息 ──
+        if conv_id.startswith("pair-"):
+            other_uid = conv_id[len("pair-"):]
+            if not other_uid:
+                return JSONResponse({"error": "conv_id 缺少 target user_id"}, status_code=400)
+
+            from app.core.memory.bot_users import BotUsersStore
+            sender = BotUsersStore().get(user_id)
+            target = BotUsersStore().get(other_uid)
+            if target is None:
+                return JSONResponse({"error": f"没找到对方 Agent: {other_uid}"}, status_code=404)
+            sender_display = (sender.display_name if sender and sender.display_name else "某用户")
+            target_label = target.display_name or target.user_id
+
+            # 推 agent_conversation 事件到双方 channel（我方 → 对方）
+            def _publish_both(payload):
+                realtime.publish(user_id, "agent_conversation", payload)
+                if not other_uid.startswith("system:"):
+                    realtime.publish(other_uid, "agent_conversation", payload)
+
+            _publish_both({
+                "round": 0, "direction": "→",
+                "from": sender_display, "from_user_id": user_id,
+                "to": target_label, "to_user_id": other_uid,
+                "text": message,
+            })
+
+            # 特殊路径：老师
+            if other_uid == "system:teacher":
+                from app.agent import teacher
+                reply = teacher.handle(user_id, message)
+            else:
+                from app.agent.runner import VoiceTaskAgent
+                reply = VoiceTaskAgent().handle_agent_message(
+                    target_user_id=other_uid,
+                    from_user_id=user_id,
+                    from_display_name=sender_display,
+                    message=message,
+                    request_authorization=False,
+                )
+            reply = (reply or "").strip() or "（对方未回复）"
+
+            _publish_both({
+                "round": 0, "direction": "←",
+                "from": target_label, "from_user_id": other_uid,
+                "to": sender_display, "to_user_id": user_id,
+                "text": reply,
+            })
+            return {"reply": reply}
+
+        return JSONResponse({"error": f"unknown conv_id: {conv_id}"}, status_code=400)
+
+    except Exception as e:  # noqa: BLE001
+        _log.getLogger(__name__).exception("panel_chat 失败")
+        return JSONResponse({"error": f"处理失败: {e}"}, status_code=500)
 
 
 @app.post("/pusher/auth")

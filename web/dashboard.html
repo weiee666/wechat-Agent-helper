@@ -472,7 +472,7 @@
       <div class="chat-messages-inner" id="chatInner"></div>
     </div>
     <div class="chat-input-area" id="inputArea">
-      <textarea id="teacherInput" placeholder="想搞懂什么？回车发送，Shift+Enter 换行" rows="1"></textarea>
+      <textarea id="panelInput" placeholder="回车发送，Shift+Enter 换行" rows="1"></textarea>
       <button id="sendBtn">发送</button>
     </div>
   </section>
@@ -486,7 +486,7 @@ const $chatSubtitle = document.getElementById('chatSubtitle');
 const $chatMessages = document.getElementById('chatMessages');
 const $chatInner = document.getElementById('chatInner');
 const $inputArea = document.getElementById('inputArea');
-const $teacherInput = document.getElementById('teacherInput');
+const $panelInput = document.getElementById('panelInput');
 const $sendBtn = document.getElementById('sendBtn');
 
 const params = new URLSearchParams(location.search);
@@ -687,13 +687,14 @@ function renderChatArea() {
     : (conv.isPair
        ? '跨 Agent 对话（默认不打扰双方微信，只在此显示）'
        : `观察对象：${userId}`);
-  // 输入框只在"跟老师聊"tab 显示
-  if (conv.isTeacher) {
-    $inputArea.classList.add('visible');
-    setTimeout(() => $teacherInput.focus(), 100);
-  } else {
-    $inputArea.classList.remove('visible');
-  }
+  // 输入框对所有 tab 显示；placeholder 根据 conv 动态
+  $inputArea.classList.add('visible');
+  $panelInput.placeholder = conv.isTeacher
+    ? '想搞懂什么？回车发送，Shift+Enter 换行'
+    : (conv.isPair
+       ? `直接跟「${conv.name.split('↔').pop().trim()}」说一句（以你自己身份）`
+       : '跟你的助手说...（回车发送，Shift+Enter 换行）');
+  setTimeout(() => $panelInput.focus(), 100);
   $chatInner.innerHTML = '';
   if (conv.items.length === 0) {
     const empty = document.createElement('div');
@@ -745,14 +746,14 @@ async function loadTeacherHistory() {
 
 let _typingBubbleEl = null;
 
-function showTypingBubble() {
-  removeTypingBubble();  // 只留一个
+function showTypingBubble(icon = '🤖') {
+  removeTypingBubble();
   const wrap = document.createElement('div');
   wrap.className = 'msg other';
   wrap.dataset.typing = '1';
   const avatar = document.createElement('div');
   avatar.className = 'avatar';
-  avatar.textContent = '👨‍🏫';
+  avatar.textContent = icon;
   const body = document.createElement('div');
   body.className = 'body';
   const bubble = document.createElement('div');
@@ -778,63 +779,71 @@ function removeTypingBubble() {
   _typingBubbleEl = null;
 }
 
-function autoGrowTeacherInput() {
-  $teacherInput.style.height = 'auto';
-  $teacherInput.style.height = Math.min($teacherInput.scrollHeight, 160) + 'px';
+function autoGrowPanelInput() {
+  $panelInput.style.height = 'auto';
+  $panelInput.style.height = Math.min($panelInput.scrollHeight, 160) + 'px';
 }
 
-async function sendToTeacher(text) {
+// 通用去重：记住每个会话最后一次前端发出的消息，收到 pusher 回声时跳过
+const _lastSentPerConv = {};
+
+async function sendMessageInCurrentConv(text) {
   const trimmed = (text || '').trim();
   if (!trimmed) return;
-  $sendBtn.disabled = true;
-  $teacherInput.disabled = true;
+  const conv = conversations[currentConvId];
+  if (!conv) return;
 
-  // Optimistic UI：立即在气泡里显示我发的消息，不等 Pusher
-  // pusher 的 teacher_user_message 事件到达时会 dedup（简单起见：允许重复也可以）
-  // 这里我们信任前端立即渲染，然后忽略掉后端 broadcast 回来的这条（用 lastSent 去重）
-  _lastSentToTeacher = trimmed;
-  appendItemToConv('teacher', { kind: 'user', text: trimmed, time: Date.now(), local: true });
-  $teacherInput.value = '';
-  autoGrowTeacherInput();
-  showTypingBubble();
+  $sendBtn.disabled = true;
+  $panelInput.disabled = true;
+
+  // 在当前会话追加自己的气泡（optimistic）
+  _lastSentPerConv[currentConvId] = trimmed;
+  appendItemToConv(currentConvId, { kind: 'user', text: trimmed, time: Date.now(), local: true });
+  $panelInput.value = '';
+  autoGrowPanelInput();
+
+  // "打字中" 三点动画（老师 tab 用👨‍🏫，别的用🤖或🔀）
+  const typingIcon = conv.isTeacher ? '👨‍🏫' : (conv.isPair ? '🔀' : '🤖');
+  showTypingBubble(typingIcon);
 
   try {
-    const r = await fetch(`${API}/teacher-chat`, {
+    const r = await fetch(`${API}/panel-chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ user_id: userId, token, message: trimmed }),
+      body: JSON.stringify({
+        user_id: userId,
+        token,
+        conv_id: currentConvId,
+        message: trimmed,
+      }),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
       removeTypingBubble();
-      appendItemToConv('teacher', {
-        kind: 'system', text: `❌ 老师处理失败：${err.error || r.status}`, time: Date.now(),
+      appendItemToConv(currentConvId, {
+        kind: 'system', text: `❌ 处理失败：${err.error || r.status}`, time: Date.now(),
       });
     }
-    // reply 通过 pusher teacher_reply 事件到达 → handleTeacherReply 会移除 typing bubble
+    // 对老师：teacher_reply 事件会移除 typing bubble
+    // 对 self：assistant_reply 事件会移除
+    // 对 pair：agent_conversation ← 事件会移除
   } catch (e) {
     removeTypingBubble();
-    appendItemToConv('teacher', {
+    appendItemToConv(currentConvId, {
       kind: 'system', text: `❌ 网络错误：${e.message}`, time: Date.now(),
     });
   } finally {
     $sendBtn.disabled = false;
-    $teacherInput.disabled = false;
-    $teacherInput.focus();
+    $panelInput.disabled = false;
+    $panelInput.focus();
   }
 }
 
-// 记住最后一次发的话，用于去重后端 broadcast 回来的 teacher_user_message
-let _lastSentToTeacher = '';
-
-// 输入框：autogrow + IME + Enter 发送 + Shift/Alt+Enter 换行
-$teacherInput.addEventListener('input', autoGrowTeacherInput);
-$teacherInput.addEventListener('keydown', (e) => {
+$panelInput.addEventListener('input', autoGrowPanelInput);
+$panelInput.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
-  // 中文输入法正在选字时，不算真正的 Enter（IE-11 / Firefox 老版本可能是 keyCode 229）
   if (e.nativeEvent.isComposing || e.keyCode === 229) return;
   if (e.altKey || e.shiftKey) {
-    // 手动换行（浏览器不会自动插入）
     e.preventDefault();
     const el = e.currentTarget;
     const start = el.selectionStart;
@@ -842,13 +851,13 @@ $teacherInput.addEventListener('keydown', (e) => {
     const v = el.value.slice(0, start) + '\n' + el.value.slice(end);
     el.value = v;
     el.selectionStart = el.selectionEnd = start + 1;
-    autoGrowTeacherInput();
+    autoGrowPanelInput();
   } else {
     e.preventDefault();
-    sendToTeacher($teacherInput.value);
+    sendMessageInCurrentConv($panelInput.value);
   }
 });
-$sendBtn.addEventListener('click', () => sendToTeacher($teacherInput.value));
+$sendBtn.addEventListener('click', () => sendMessageInCurrentConv($panelInput.value));
 
 // ── 事件路由 ──
 function appendItemToConv(convId, item) {
@@ -873,18 +882,23 @@ function appendItemToConv(convId, item) {
 
 // 收到 user_message
 function handleUser(text) {
-  conversations.self._pendingDetails = [];  // 新一轮开始
+  conversations.self._pendingDetails = [];
+  // 如果这条正好是本地刚 optimistic 发出的，跳过重复
+  if (text && text === _lastSentPerConv.self) {
+    _lastSentPerConv.self = '';
+    return;
+  }
   appendItemToConv('self', { kind: 'user', text, time: Date.now() });
 }
 
 // 收到 verbose 事件（思考/工具）
 function handleVerbose(type, text) {
-  // 累积到 self 会话的 _pendingDetails，等下一个 assistant_reply 挂上
   conversations.self._pendingDetails.push({ type, text });
 }
 
 // 收到 assistant_reply
 function handleAssistant(text) {
+  if (currentConvId === 'self') removeTypingBubble();
   const details = conversations.self._pendingDetails;
   conversations.self._pendingDetails = [];
   appendItemToConv('self', {
@@ -912,10 +926,18 @@ function handleAgentConversation(data) {
       items: [],
       unread: 0,
       isPair: true,
+      otherUid,
       _pendingDetails: [],
     };
   }
   const isMineOutgoing = data.from_user_id === userId;
+  // 去重 optimistic
+  if (isMineOutgoing && data.text && data.text === _lastSentPerConv[convId]) {
+    _lastSentPerConv[convId] = '';
+    return;
+  }
+  // 对方回复 → 移除 typing
+  if (!isMineOutgoing && currentConvId === convId) removeTypingBubble();
   appendItemToConv(convId, {
     kind: isMineOutgoing ? 'agent_out' : 'agent_in',
     text: data.text || '',
@@ -1001,9 +1023,8 @@ renderChatArea();
 // 老师事件路由（跟 self 会话对称）
 function handleTeacherUser(text) {
   conversations.teacher._pendingDetails = [];
-  // 如果这条正好是我们刚 optimistic 加过的，跳过（不重复）
-  if (text && text === _lastSentToTeacher) {
-    _lastSentToTeacher = '';
+  if (text && text === _lastSentPerConv.teacher) {
+    _lastSentPerConv.teacher = '';
     return;
   }
   appendItemToConv('teacher', { kind: 'user', text, time: Date.now() });
@@ -1012,7 +1033,7 @@ function handleTeacherVerbose(type, text) {
   conversations.teacher._pendingDetails.push({ type, text });
 }
 function handleTeacherReply(text) {
-  removeTypingBubble();
+  if (currentConvId === 'teacher') removeTypingBubble();
   const details = conversations.teacher._pendingDetails;
   conversations.teacher._pendingDetails = [];
   appendItemToConv('teacher', {
