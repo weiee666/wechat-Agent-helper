@@ -176,8 +176,7 @@ class VoiceTaskAgent:
             url = f"{config.DASHBOARD_URL_BASE}{sep}token={token}&user_id={user_id}"
             # 姓名/Agent 名字缺失时，走独立 push（不塞进本条 reply 里）
             _push_profile_hint_if_needed(user_id)
-            return Result(transcript=text, used_tool=True,
-                          reply=f"🔭 旁观面板（1 小时内有效）：\n{url}")
+            return Result(transcript=text, used_tool=True, reply=url)
 
         verbose = UserSettingsStore().get_verbose(user_id)
 
