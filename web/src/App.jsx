@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { Layout, Typography, Toast, Spin } from '@douyinfe/semi-ui'
+import { Layout, Typography, Toast, Spin, Button } from '@douyinfe/semi-ui'
+import { IconChevronLeft } from '@douyinfe/semi-icons'
 import * as api from './api.js'
 import { subscribeChannel } from './pusher.js'
 import { defaultConversations, participantsOf } from './state.js'
@@ -53,6 +54,18 @@ export default function App() {
   const [status, setStatus] = useState('connecting')
   const [ready, setReady] = useState(false)
   const [error, setError] = useState(null)
+  // 手机端布局：'list' | 'chat'。桌面端此 state 无效（用 CSS 直接双栏）
+  const [isMobile, setIsMobile] = useState(() =>
+    typeof window !== 'undefined' && window.matchMedia('(max-width: 768px)').matches
+  )
+  const [mobileView, setMobileView] = useState('list')
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 768px)')
+    const onChange = (e) => setIsMobile(e.matches)
+    mq.addEventListener?.('change', onChange)
+    return () => mq.removeEventListener?.('change', onChange)
+  }, [])
 
   const convsRef = useRef(conversations)
   useEffect(() => { convsRef.current = conversations }, [conversations])
@@ -175,6 +188,10 @@ export default function App() {
   const selectConv = useCallback(async (convId) => {
     setCurrentConvId(convId)
     updateConv(convId, { unread: 0 })
+    // 手机上点某条 conv → 切换到 chat 视图
+    if (window.matchMedia('(max-width: 768px)').matches) {
+      setMobileView('chat')
+    }
     const conv = convsRef.current[convId]
     if (conv && !conv.historyLoaded && convId !== 'self') {
       updateConv(convId, { historyLoaded: true })
@@ -298,45 +315,72 @@ export default function App() {
   const currentConv = conversations[currentConvId]
   const participants = participantsOf(currentConv, me)
 
+  // 手机上根据 mobileView 决定显示哪一栏；桌面上并排
+  const showSider = !isMobile || mobileView === 'list'
+  const showChat = !isMobile || mobileView === 'chat'
+
   return (
     <Layout style={{ height: '100vh', background: 'var(--bg-chat)' }}>
-      <Sider style={{ width: 280, background: '#fff', flex: '0 0 280px' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--semi-color-border)' }}>
-          <Title heading={5} style={{ margin: 0, fontSize: 16 }}>会话</Title>
-          <Text size="small" type="tertiary">{me.display_name || userId}</Text>
-        </div>
-        <Sidebar
-          conversations={conversations}
-          currentConvId={currentConvId}
-          onSelect={selectConv}
-          status={status}
-        />
-      </Sider>
-      <Layout>
-        <Header style={{
+      {showSider && (
+        <Sider style={{
+          width: isMobile ? '100%' : 280,
           background: '#fff',
-          borderBottom: '1px solid var(--semi-color-border)',
-          padding: '10px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          height: 56,
+          flex: isMobile ? '1 1 100%' : '0 0 280px',
+          maxWidth: isMobile ? '100%' : 280,
         }}>
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 600 }}>{currentConv?.name}</div>
-            <div style={{ fontSize: 12, color: 'var(--semi-color-text-2)' }}>
-              {currentConv?.kind === 'teacher' && '苏格拉底 + 费曼'}
-              {currentConv?.kind === 'claude' && '本地 Claude Code CLI'}
-              {currentConv?.kind === 'pair' && '跨 Agent 对话'}
-            </div>
+          <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--semi-color-border)' }}>
+            <Title heading={5} style={{ margin: 0, fontSize: 16 }}>会话</Title>
+            <Text size="small" type="tertiary">{me.display_name || userId}</Text>
           </div>
-          <ParticipantsGroup participants={participants} />
-        </Header>
-        <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <MessageList conv={currentConv} me={me} />
-          <Composer onSend={send} disabled={!currentConv} />
-        </Content>
-      </Layout>
+          <Sidebar
+            conversations={conversations}
+            currentConvId={currentConvId}
+            onSelect={selectConv}
+            status={status}
+          />
+        </Sider>
+      )}
+      {showChat && (
+        <Layout>
+          <Header style={{
+            background: '#fff',
+            borderBottom: '1px solid var(--semi-color-border)',
+            padding: '10px 16px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            height: 56,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+              {isMobile && (
+                <Button
+                  icon={<IconChevronLeft />}
+                  theme="borderless"
+                  type="tertiary"
+                  onClick={() => setMobileView('list')}
+                  style={{ flexShrink: 0 }}
+                />
+              )}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {currentConv?.name}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--semi-color-text-2)' }}>
+                  {currentConv?.kind === 'teacher' && '苏格拉底 + 费曼'}
+                  {currentConv?.kind === 'claude' && '本地 Claude Code CLI'}
+                  {currentConv?.kind === 'pair' && '跨 Agent 对话'}
+                </div>
+              </div>
+            </div>
+            <ParticipantsGroup participants={participants} />
+          </Header>
+          <Content style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <MessageList conv={currentConv} me={me} />
+            <Composer onSend={send} disabled={!currentConv} />
+          </Content>
+        </Layout>
+      )}
     </Layout>
   )
 }
