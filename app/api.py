@@ -252,6 +252,8 @@ async def panel_chat(request: Request):
               "tool_call": "verbose_tool_call",
               "tool_out": "verbose_tool_out"}
 
+    import asyncio as _asyncio
+
     try:
         # ── self：走跟微信一样的 handle_text 但不 push 到 iLink ──
         if conv_id == "self":
@@ -266,7 +268,9 @@ async def panel_chat(request: Request):
 
             # 前端已经 optimistic 显示了用户消息，仍然推一次给面板一致性
             realtime.publish(user_id, "user_message", {"text": message})
-            result = VoiceTaskAgent().handle_text(
+            # to_thread：LLM + tool 走 executor thread，不阻塞 event loop
+            result = await _asyncio.to_thread(
+                VoiceTaskAgent().handle_text,
                 text=message, user_id=user_id,
                 emit=_wechat_emit, realtime_emit=_realtime_emit,
             )
@@ -278,7 +282,7 @@ async def panel_chat(request: Request):
         # ── teacher：走 teacher.handle ──
         if conv_id == "teacher":
             from app.agent import teacher
-            reply = teacher.handle(user_id, message)
+            reply = await _asyncio.to_thread(teacher.handle, user_id, message)
             return {"reply": reply}
 
         # ── claude：走 claude_agent hub.ask_async（await，避免死锁自己的 event loop）──
@@ -337,18 +341,17 @@ async def panel_chat(request: Request):
                 "text": message,
             })
 
-            # 特殊路径：老师
+            # 特殊路径：老师（to_thread 避免阻塞 event loop）
             if other_uid == "system:teacher":
                 from app.agent import teacher
-                reply = teacher.handle(user_id, message, publish_channel_events=False)
+                reply = await _asyncio.to_thread(
+                    teacher.handle, user_id, message, False,
+                )
             else:
                 from app.agent.runner import VoiceTaskAgent
-                reply = VoiceTaskAgent().handle_agent_message(
-                    target_user_id=other_uid,
-                    from_user_id=user_id,
-                    from_display_name=sender_display,
-                    message=message,
-                    request_authorization=False,
+                reply = await _asyncio.to_thread(
+                    VoiceTaskAgent().handle_agent_message,
+                    other_uid, user_id, sender_display, message, False,
                 )
             reply = (reply or "").strip() or "（对方未回复）"
 
