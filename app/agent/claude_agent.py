@@ -215,7 +215,43 @@ def register_in_bot_users() -> None:
     logger.info("Claude Agent 已注册（等 Mac daemon 上线）")
 
 
+def _stm_session_id(user_id: str) -> str:
+    return f"claude:{user_id}"
+
+
 def handle(user_id: str, message: str) -> str:
     """同步入口（tools.call_agent 特殊路径 / panel_chat 调用）。
-    per-user session 自动关联（第一次问 Claude 创建 session，后续用 --resume 接续）。"""
-    return hub.ask_sync(user_id, message)
+    per-user session 自动关联（第一次问 Claude 创建 session，后续用 --resume 接续）。
+    落 SQLite：session_id=claude:{uid}，方便看板拉历史。"""
+    from app.core.memory.short_term import ShortTermMemory
+    from app.models.enums import MessageRole
+    from app.models.schemas import Message
+
+    reply = hub.ask_sync(user_id, message)
+    try:
+        sid = _stm_session_id(user_id)
+        stm = ShortTermMemory()
+        stm.add_message(sid, Message(role=MessageRole.USER, content=message))
+        stm.add_message(sid, Message(role=MessageRole.ASSISTANT, content=reply or ""))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Claude 历史落库失败: %s", e)
+    return reply
+
+
+def history(user_id: str) -> list[dict]:
+    """给看板拉历史用。返回 [{role, content}] 列表。"""
+    from app.core.memory.short_term import ShortTermMemory
+    msgs = ShortTermMemory().get_history(_stm_session_id(user_id))
+    return [{"role": m.role.value, "content": m.content} for m in msgs]
+
+
+def clear(user_id: str) -> None:
+    """清空 Claude 历史（用户主动清空时）。"""
+    from app.core.memory.store import get_conn
+    conn = get_conn()
+    try:
+        conn.execute("DELETE FROM stm_messages WHERE session_id=?", (_stm_session_id(user_id),))
+        conn.commit()
+    finally:
+        conn.close()
+    hub.reset_session(user_id)

@@ -135,14 +135,20 @@ async def teacher_chat(request: Request):
     return {"reply": reply}
 
 
+def _pair_session_id(a: str, b: str) -> str:
+    """双方共享的 pair 会话 id（顺序无关）。"""
+    x, y = sorted([a, b])
+    return f"pair:{x}|{y}"
+
+
 @app.get("/panel/history")
 def panel_history(user_id: str = "", token: str = "", conv_id: str = "", limit: int = 50):
     """看板通用历史接口。一段代码搞定所有 tab。
     conv_id:
       - 'self'          → stm_messages WHERE session_id=user_id
       - 'teacher'       → stm_messages WHERE session_id='teacher:{user_id}'
-      - 'claude'        → 暂不落库，返回空
-      - 'pair-{other}'  → 暂不落库，返回空
+      - 'claude'        → stm_messages WHERE session_id='claude:{user_id}'
+      - 'pair-{other}'  → stm_messages WHERE session_id='pair:{sorted}'
     """
     err = _auth_or_401(user_id, token)
     if err:
@@ -151,6 +157,13 @@ def panel_history(user_id: str = "", token: str = "", conv_id: str = "", limit: 
         session_id = user_id
     elif conv_id == "teacher":
         session_id = f"teacher:{user_id}"
+    elif conv_id == "claude":
+        session_id = f"claude:{user_id}"
+    elif conv_id.startswith("pair-"):
+        other = conv_id[len("pair-"):]
+        if not other:
+            return {"messages": []}
+        session_id = _pair_session_id(user_id, other)
     else:
         return {"messages": []}
     from app.core.memory.short_term import ShortTermMemory
@@ -162,6 +175,57 @@ def panel_history(user_id: str = "", token: str = "", conv_id: str = "", limit: 
             for m in tail
         ],
     }
+
+
+@app.get("/panel/conversations")
+def panel_conversations(user_id: str = "", token: str = ""):
+    """返回该用户当前该显示的所有 tab（self / teacher / claude / pair-...）。
+    pair 通过 scan stm_messages.session_id LIKE 'pair:%|%' 发现。
+    self / teacher / claude 三个是常驻 tab（不管有没有历史都返回）。"""
+    err = _auth_or_401(user_id, token)
+    if err:
+        return err
+    from app.core.memory.bot_users import BotUsersStore
+    from app.core.memory.store import get_conn
+
+    tabs = [
+        {"conv_id": "self", "kind": "self", "name": "我和助手", "icon": "🤖"},
+        {"conv_id": "teacher", "kind": "teacher", "name": "老师 Agent", "icon": "👨‍🏫"},
+        {"conv_id": "claude", "kind": "claude", "name": "Claude", "icon": "🤖"},
+    ]
+
+    # scan pair convs：session_id 形如 'pair:{a}|{b}'
+    conn = get_conn()
+    try:
+        cur = conn.execute(
+            "SELECT DISTINCT session_id FROM stm_messages WHERE session_id LIKE 'pair:%|%'",
+        )
+        pair_sessions = [row["session_id"] for row in cur.fetchall()]
+    finally:
+        conn.close()
+
+    store = BotUsersStore()
+    for sid in pair_sessions:
+        # 'pair:{x}|{y}' → 拆双方 uid
+        payload = sid[len("pair:"):]
+        parts = payload.split("|", 1)
+        if len(parts) != 2:
+            continue
+        a, b = parts
+        if user_id != a and user_id != b:
+            continue
+        other = b if user_id == a else a
+        other_user = store.get(other)
+        other_name = (other_user.display_name if other_user else other) or other
+        tabs.append({
+            "conv_id": f"pair-{other}",
+            "kind": "pair",
+            "name": f"{other_name} 的助手",
+            "icon": "🔀",
+            "other_user_id": other,
+            "other_display_name": other_name,
+        })
+    return {"conversations": tabs}
 
 
 @app.post("/panel/chat")
@@ -264,7 +328,7 @@ async def panel_chat(request: Request):
             # 特殊路径：老师
             if other_uid == "system:teacher":
                 from app.agent import teacher
-                reply = teacher.handle(user_id, message)
+                reply = teacher.handle(user_id, message, publish_channel_events=False)
             else:
                 from app.agent.runner import VoiceTaskAgent
                 reply = VoiceTaskAgent().handle_agent_message(
@@ -282,6 +346,26 @@ async def panel_chat(request: Request):
                 "to": sender_display, "to_user_id": user_id,
                 "text": reply,
             })
+
+            # ── 落 SQLite：双方共享 session_id，metadata 记 from_user_id 用于气泡定位 ──
+            try:
+                from app.core.memory.short_term import ShortTermMemory
+                from app.models.enums import MessageRole
+                from app.models.schemas import Message
+                pair_sid = _pair_session_id(user_id, other_uid)
+                stm = ShortTermMemory()
+                stm.add_message(pair_sid, Message(
+                    role=MessageRole.USER, content=message,
+                    metadata={"from_user_id": user_id, "from_display_name": sender_display},
+                ))
+                stm.add_message(pair_sid, Message(
+                    role=MessageRole.USER, content=reply,
+                    metadata={"from_user_id": other_uid, "from_display_name": target_label},
+                ))
+            except Exception as e:  # noqa: BLE001
+                import logging as _log2
+                _log2.getLogger(__name__).warning("pair 消息落库失败: %s", e)
+
             return {"reply": reply}
 
         return JSONResponse({"error": f"unknown conv_id: {conv_id}"}, status_code=400)

@@ -211,6 +211,28 @@ def call_agent(target_name: str, message: str, user_id: UserId = "default") -> s
         "text": reply,
     })
 
+    # ── 落 pair 对话 SQLite（双方看板 pair tab 都能拉到）──
+    try:
+        from app.core.memory.short_term import ShortTermMemory
+        from app.models.enums import MessageRole
+        from app.models.schemas import Message
+        x, y = sorted([user_id, target.user_id])
+        pair_sid = f"pair:{x}|{y}"
+        stm = ShortTermMemory()
+        stm.add_message(pair_sid, Message(
+            role=MessageRole.USER, content=message,
+            metadata={"from_user_id": user_id, "from_display_name": sender_display,
+                      "round": round_num},
+        ))
+        stm.add_message(pair_sid, Message(
+            role=MessageRole.USER, content=reply,
+            metadata={"from_user_id": target.user_id, "from_display_name": target_label,
+                      "round": round_num},
+        ))
+    except Exception as e:  # noqa: BLE001
+        import logging as _log
+        _log.getLogger(__name__).warning("call_agent pair 落库失败: %s", e)
+
     return (f"「{target_label}」的助手回复：\n{reply}\n\n"
             f"[提示] 请综合对方回复给你的用户一个自然的中文回应。用户微信不会自动看到原文。"
             f"如果对方回复没把事情说清、需要追问才能完成用户交办的事，可以再调用 call_agent 追问"

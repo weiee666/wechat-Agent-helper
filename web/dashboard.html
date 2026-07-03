@@ -871,7 +871,7 @@ function selectConversation(convId) {
   const conv = conversations[convId];
   if (conv) conv.unread = 0;
   // 首次打开非 self 会话时按需拉历史（走同一个统一 API）
-  if (conv && !conv.historyLoaded && (conv.isTeacher || conv.isClaude)) {
+  if (conv && !conv.historyLoaded && (conv.isTeacher || conv.isClaude || conv.isPair)) {
     conv.historyLoaded = true;
     loadConvHistory(convId);
   }
@@ -907,9 +907,18 @@ async function loadConvHistory(convId) {
     const conv = conversations[convId];
     if (!conv) return;
     for (const m of data.messages) {
-      const kind = m.role === 'assistant' ? 'assistant'
-                 : (m.role === 'system' ? 'system' : 'user');
-      conv.items.push({ kind, text: m.content, time: Date.now(), historical: true });
+      let kind;
+      let extra = {};
+      if (conv.isPair) {
+        // pair 消息：role 都是 user，用 metadata.from_user_id 判断左右侧
+        const from = (m.metadata && m.metadata.from_user_id) || '';
+        kind = from === userId ? 'agent_out' : 'agent_in';
+        extra.agentName = (m.metadata && m.metadata.from_display_name) || '';
+      } else {
+        kind = m.role === 'assistant' ? 'assistant'
+             : (m.role === 'system' ? 'system' : 'user');
+      }
+      conv.items.push({ kind, text: m.content, time: Date.now(), historical: true, ...extra });
     }
     if (currentConvId === convId) renderChatArea();
     renderSidebar();
@@ -1153,6 +1162,37 @@ renderChatArea();
 
   // self 会话历史（用统一的 panel-history）
   loadConvHistory('self');
+
+  // 拉持久化的会话列表：把落库过的 pair tab 恢复出来（刷新/换 token 后仍在）
+  try {
+    const r = await fetch(
+      `${API}/panel-conversations?uid=${encodeURIComponent(userId)}` +
+      `&token=${encodeURIComponent(token)}`
+    );
+    if (r.ok) {
+      const data = await r.json();
+      const list = (data && data.conversations) || [];
+      for (const tab of list) {
+        if (tab.kind !== 'pair') continue;
+        const cid = tab.conv_id;
+        if (conversations[cid]) continue;
+        const otherName = tab.other_display_name || tab.other_user_id;
+        conversations[cid] = {
+          id: cid,
+          name: `${ME.agent_name || '我的助手'} ↔ ${otherName}`,
+          icon: '🔀',
+          items: [],
+          unread: 0,
+          isPair: true,
+          otherUid: tab.other_user_id,
+          otherName,
+          myName: ME.agent_name || '我的助手',
+          _pendingDetails: [],
+        };
+      }
+      renderSidebar();
+    }
+  } catch (e) { console.warn('拉 tab 列表失败', e); }
 
   const pusher = new Pusher(cfg.pusher_key, {
     cluster: cfg.pusher_cluster,
