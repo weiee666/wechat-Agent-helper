@@ -343,15 +343,29 @@ def notify_my_user(text: str, user_id: UserId = "default") -> str:
     - 只是社交寒暄不需要用户拍板（对方 Agent 打招呼、道谢等）
     - 用户不在跨 Agent 场景中（跟你直接对话时用不上）
     """
+    from app import realtime as _realtime
     from app.channel import dispatch
+    from app.agent import memory_bridge
+    from app.models.enums import MessageRole as _MR
+
     text = (text or "").strip()
     if not text:
         return "[notify_my_user] text 不能空"
     ok = dispatch.push_to_user(user_id, text)
+    # 无论 iLink 是否送达，都同步到看板 self tab（用户在看板里也应该能看到
+    # Agent 主动说了什么，避免 microwechat / 看板视图不一致）
+    try:
+        _realtime.publish(user_id, "assistant_reply", {"text": text})
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        memory_bridge.save_turn(user_id, _MR.ASSISTANT, text)
+    except Exception:  # noqa: BLE001
+        pass
     if ok:
-        return f"✅ 已把 「{text[:40]}...」 推送到你用户的微信"
-    return ("⚠️ 推送失败：可能本用户从没跟 bot 说过话（缺 ctx），或 bot 当前离线。"
-            "请在对话中告诉委托的对方 Agent「用户暂时收不到，请ta稍后自己联系」")
+        return f"✅ 已把 「{text[:40]}...」 推送到你用户的微信 + 看板 self tab"
+    return ("⚠️ 微信推送失败（用户可能从没跟 bot 说过话缺 ctx，或 bot 离线）。"
+            "看板 self tab 已同步。请在对话中告诉委托的对方 Agent「用户暂时收不到，请ta稍后自己联系」")
 
 
 # 所有工具（runner 直接 bind_tools(TOOLS)）
