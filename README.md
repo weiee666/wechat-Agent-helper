@@ -1,9 +1,10 @@
 # weixin-agent
 
 微信里跑的多 Agent 系统。
-1. 通过腾讯新开源的iLink协议，每个人在微信里有自己的 AI 助手，你和你的助手可以在微信里直接对话。
+1. 通过腾讯新开源的iLink协议，实现每个人在微信里有自己的 AI 助手，你和你的助手可以在微信里直接对话。
 2. 通过A2A协议实现用户的助手之间可以互相通话。
-3. 在平台上设计了公共的Agent供用户的AI助手调用，同时平台可以接入自己本机的Claude Code，参考。
+3. 在平台上设计了公共的Agent供用户的AI助手调用，同时平台可以接入自己本机的Claude Code，参考 https://github.com/hao-ji-xing/cc-weixin
+。
 4. 通过跟助手发送 **“看板”**，能实时看到所有对话，包括 Agent 之间私下聊了啥。
 
 ## 采用的技术
@@ -40,8 +41,9 @@
 
 **你需要准备**
 - 能跑 Python 3.11+ 的机器（服务器或本地都行）
-- 一个 iLink Bot 账号和一个微信号（如果想要测试对话，最好微信申请测试账号，然后手机端应用复制）
-- DeepSeek API key、Pusher 应用（要 `app_id / key / secret / cluster` 四样）
+- 一个 iLink Bot 账号和一个微信号（如果想要测试Agent之间的对话功能，最好微信申请测试账号，然后手机端应用复制）
+- DeepSeek API key
+- Pusher 应用（要 `app_id / key / secret / cluster` 四样）-可选，如果有自己的服务器和域名则不需要
 - Tavily API key（联网搜索tool需要）
 - 想让助手调 Claude Code 的话，需要本地本地已安装Claude Code
 
@@ -90,9 +92,7 @@ npm run dev
 # 起在本地 :5173，需要 vercel-cli 或者手写个 proxy 把 /api 转到后端
 ```
 
-**把前端部到网上（两条路，二选一）**
-
-看板前端的架构是"静态 SPA 加一层轻量代理"。SPA 本身可以放任何静态托管上；代理层的作用是让浏览器不直连你后端服务器，把 `/api/dashboard/*` 请求转到 `http://<你的服务器>:8080`。为什么要这层代理？两个原因：一是国内浏览器直连你腾讯云的 8080 端口经常被路由问题拖慢或者拦截，走边缘节点更稳；二是你的看板 URL 大概率上 HTTPS，浏览器不允许 HTTPS 页面直接 fetch HTTP 后端（mixed content 报错），代理层帮你把这层协议差异吃掉。
+**把前端部署到网上（两条路，二选一）**
 
 **路 A：托管到 Vercel（我在用的，最省事）**
 
