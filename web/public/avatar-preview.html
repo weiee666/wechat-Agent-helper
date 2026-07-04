@@ -62,27 +62,33 @@
   </div>
 
   <script>
-    // 每种 DiceBear 风格：一个 label + 说明 + 每种角色对应的完整 URL
+    // 每行统一用一个 DiceBear 风格 —— bot / peer_bot 也跟着变，看整套搭配
     const STYLES = [
-      { name: 'pixel-art',           desc: '像素画/复古游戏感（当前用的）',        userStyle: 'pixel-art' },
-      { name: 'micah',               desc: '扁平几何设计感',                       userStyle: 'micah' },
-      { name: 'avataaars',           desc: '卡通丰富，Sketch 风',                  userStyle: 'avataaars' },
-      { name: 'personas',            desc: '圆润卡通，有点 Slack 风',              userStyle: 'personas' },
-      { name: 'notionists',          desc: 'Notion 手绘风',                        userStyle: 'notionists' },
-      { name: 'notionists-neutral',  desc: 'Notion 手绘无饰品',                    userStyle: 'notionists-neutral' },
-      { name: 'lorelei',             desc: '漂亮线条人像',                         userStyle: 'lorelei' },
-      { name: 'open-peeps',          desc: '大头线条人像',                         userStyle: 'open-peeps' },
-      { name: 'adventurer',          desc: '冒险家角色',                           userStyle: 'adventurer' },
-      { name: 'big-smile',           desc: '大笑脸风格',                           userStyle: 'big-smile' },
-      { name: 'big-ears',            desc: '大耳朵可爱',                           userStyle: 'big-ears' },
-      { name: 'fun-emoji',           desc: '花哨大表情',                           userStyle: 'fun-emoji' },
-      { name: 'miniavs',             desc: '极简迷你头像',                         userStyle: 'miniavs' },
-      { name: 'thumbs',              desc: '大拇指风格（好玩）',                   userStyle: 'thumbs' },
-      { name: 'croodles',            desc: '涂鸦画风',                             userStyle: 'croodles' },
+      // ── 人像风 ──
+      { name: 'pixel-art',           desc: '像素画/复古游戏感（当前用的）' },
+      { name: 'micah',               desc: '扁平几何设计感' },
+      { name: 'avataaars',           desc: 'Sketch 卡通' },
+      { name: 'personas',            desc: 'Slack 圆润卡通' },
+      { name: 'notionists',          desc: 'Notion 手绘' },
+      { name: 'lorelei',             desc: '漂亮线条人像' },
+      { name: 'open-peeps',          desc: '大头线条人' },
+      { name: 'adventurer',          desc: '冒险家角色' },
+      { name: 'miniavs',             desc: '极简迷你头像' },
+      { name: 'croodles',            desc: '涂鸦画风' },
+      // ── 机器人 / 抽象 / Emoji ──
+      { name: 'bottts',              desc: '花哨机器人' },
+      { name: 'bottts-neutral',      desc: '简约机器人（原来用的）' },
+      { name: 'fun-emoji',           desc: '大 emoji 表情脸' },
+      { name: 'big-smile',           desc: '大笑脸' },
+      { name: 'big-ears',            desc: '大耳朵可爱' },
+      { name: 'thumbs',              desc: '大拇指抽象' },
+      // ── 完全抽象 / 无面孔 ──
+      { name: 'shapes',              desc: '抽象几何形状' },
+      { name: 'rings',               desc: '环形抽象' },
+      { name: 'glass',               desc: '玻璃质感' },
+      { name: 'identicon',           desc: 'GitHub 风 identicon' },
+      { name: 'initials',            desc: '首字母（seed 首字母）' },
     ]
-
-    // Bot / peer_bot 全部走 bottts-neutral（机器人）—— 无论选什么风格
-    const BOT_STYLE = 'bottts-neutral'
 
     // 角色 → seed（保持一致，切换风格时形象连续）
     const SEEDS = { user: 'Weibo', teacher: 'Professor', bot: 'Assistant', peer_bot: 'Peer' }
@@ -94,11 +100,10 @@
     }
 
     function urlFor(role, style) {
-      // bot / peer_bot 强制机器人风格
-      const useStyle = (role === 'bot' || role === 'peer_bot') ? BOT_STYLE : style
       const seed = SEEDS[role]
       const bg = BG[role]
-      return `https://api.dicebear.com/9.x/${useStyle}/svg?seed=${seed}&backgroundColor=${bg}&backgroundType=gradientLinear`
+      // 部分风格不支持背景色（比如 shapes/glass 本身是有色的），传了也没害
+      return `https://api.dicebear.com/9.x/${style}/svg?seed=${seed}&backgroundColor=${bg}&backgroundType=gradientLinear`
     }
     function claudeUrl() {
       return 'https://api.dicebear.com/9.x/initials/svg?seed=Claude&backgroundColor=D97757&fontWeight=600&textColor=ffffff'
@@ -120,7 +125,7 @@
       for (const role of ROLES) {
         const cell = document.createElement('div')
         cell.className = 'avatar-cell'
-        const url = role === 'claude' ? claudeUrl() : urlFor(role, s.userStyle)
+        const url = role === 'claude' ? claudeUrl() : urlFor(role, s.name)
         cell.innerHTML = `<img src="${url}" alt="${role}"><div class="label">${ROLE_LABEL[role]}</div>`
         grid.appendChild(cell)
       }
