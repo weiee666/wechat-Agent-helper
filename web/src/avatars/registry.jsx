@@ -3,13 +3,14 @@
 // - Claude 用 Anthropic 官方 apple-touch-icon
 // - 加载失败降级为纯色圆 + 首字母
 
-// micah（扁平设计感人像）+ bottts-neutral（简约机器人）+ initials（大写字母 avatar，Claude 用）
+// pixel-art 风格（像素画）—— 复古游戏感，seed 决定长相
+// Claude 保持 initials（大写 C + Anthropic 橙），像素画不适合表达品牌
 const AVATAR_URL = {
-  user:     'https://api.dicebear.com/9.x/micah/svg?seed=Weibo&backgroundColor=b6e3f4,c0aede&backgroundType=gradientLinear',
-  bot:      'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Assistant&backgroundColor=00d6b9,4ecdc4&backgroundType=gradientLinear',
-  teacher:  'https://api.dicebear.com/9.x/micah/svg?seed=Professor&backgroundColor=c084fc,a78bfa&backgroundType=gradientLinear',
+  user:     'https://api.dicebear.com/9.x/pixel-art/svg?seed=Weibo&backgroundColor=b6e3f4,c0aede&backgroundType=gradientLinear',
+  bot:      'https://api.dicebear.com/9.x/pixel-art/svg?seed=Assistant&backgroundColor=00d6b9,4ecdc4&backgroundType=gradientLinear',
+  teacher:  'https://api.dicebear.com/9.x/pixel-art/svg?seed=Professor&backgroundColor=c084fc,a78bfa&backgroundType=gradientLinear',
   claude:   'https://api.dicebear.com/9.x/initials/svg?seed=Claude&backgroundColor=D97757&fontWeight=600&textColor=ffffff',
-  peer_bot: 'https://api.dicebear.com/9.x/bottts-neutral/svg?seed=Peer&backgroundColor=fca5a5,f87171&backgroundType=gradientLinear',
+  peer_bot: 'https://api.dicebear.com/9.x/pixel-art/svg?seed=Peer&backgroundColor=fca5a5,f87171&backgroundType=gradientLinear',
 }
 
 const FALLBACK_BG = {
