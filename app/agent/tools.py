@@ -322,10 +322,42 @@ def web_search(query: str, user_id: UserId = "default") -> str:
     return "\n".join(lines)
 
 
+# ── notify_my_user ─────────────────────────────────────────
+@tool
+def notify_my_user(text: str, user_id: UserId = "default") -> str:
+    """把一段消息主动推到当前 Agent 所服务的**本用户**的微信里。
+
+    **只在跨 Agent 对话场景中使用**：当另一个用户的 Agent 让你转达一句话给你的用户
+    （打招呼、通知、告知、祝福这类"应该让本人看到"的内容）时，除了给对方 Agent 回一句
+    简短的确认，你**必须**再调这个工具，把消息真正传达到本用户的微信里 —— 否则用户
+    永远不会知道有人托你带话。
+
+    text 里要注明**是谁委托的**，例如：
+    - "危博让我告诉你：晚安！"
+    - "小明说他明天下午两点在楼下等你"
+    - "小张祝你生日快乐～"
+
+    **不要**调用这个工具的场景：
+    - 对方 Agent 是纯问询（"帮我问你用户几点了" / "他明天有空吗"）—— 你自己知道就答对方，
+      不知道就答"这个我不清楚"，不需要打扰用户
+    - 只是社交寒暄不需要用户拍板（对方 Agent 打招呼、道谢等）
+    - 用户不在跨 Agent 场景中（跟你直接对话时用不上）
+    """
+    from app.channel import dispatch
+    text = (text or "").strip()
+    if not text:
+        return "[notify_my_user] text 不能空"
+    ok = dispatch.push_to_user(user_id, text)
+    if ok:
+        return f"✅ 已把 「{text[:40]}...」 推送到你用户的微信"
+    return ("⚠️ 推送失败：可能本用户从没跟 bot 说过话（缺 ctx），或 bot 当前离线。"
+            "请在对话中告诉委托的对方 Agent「用户暂时收不到，请ta稍后自己联系」")
+
+
 # 所有工具（runner 直接 bind_tools(TOOLS)）
 TOOLS = [
     structure_task, start_recording,
     set_my_name, set_agent_name, call_agent,
-    web_search,
+    web_search, notify_my_user,
 ]
 BY_NAME = {t.name: t for t in TOOLS}

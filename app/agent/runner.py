@@ -325,7 +325,15 @@ class VoiceTaskAgent:
             f"5. **需要澄清才能完成的事**：主动调 call_agent 追问对方（比如对方说「帮我问下时间」，"
             f"你要反问「什么时间段？什么时区？」才能给出有意义的回复）。轻信直接答会让协作低质量。\n"
             f"6. 一轮完成不了的**不要硬要一轮完成**——追问几轮换来准确答复远比一句敷衍强。\n"
-            f"7. 5 轮硬上限，超了系统会阻止。当前第 {conversation.get_round()} 轮。"
+            f"7. 5 轮硬上限，超了系统会阻止。当前第 {conversation.get_round()} 轮。\n"
+            f"8. **转达类消息（重要）**：如果对方 Agent 的消息内容是让你**传话给 {target_display}**"
+            f"（打招呼、通知、祝福、告知——「跟 X 说晚安」「告诉 X 明天开会」「祝 X 生日快乐」这类），"
+            f"你除了给对方 Agent 回一句简短确认，**必须调 notify_my_user 工具**把消息真的推给 {target_display} 的微信。"
+            f"text 里注明是谁托的，例如「{from_display_name} 让我告诉你：晚安！」。"
+            f"不调这个工具 = 用户永远收不到，就是失职。\n"
+            f"9. **问询类消息**（「帮我问你用户几点了 / 明天有没有空 / XX 是什么」）"
+            f"—— 只用 return reply 给对方 Agent 就够了，**不用**调 notify_my_user，"
+            f"避免把用户当「话务员」打扰。"
         )
         messages = [SystemMessage(content=_load_system_prompt() + system_extra)]
         if ctx.long_term_items:
