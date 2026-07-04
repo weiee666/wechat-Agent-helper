@@ -50,8 +50,8 @@
 **跑起后端**
 
 ```bash
-git clone https://github.com/weiee666/weixin-agent.git
-cd weixin-agent
+git clone https://github.com/weiee666/wechat-Agent-helper.git
+cd wechat-Agent-helper
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -148,7 +148,7 @@ server {
 在 Mac 上：
 
 ```bash
-cd weixin-agent
+cd wechat-Agent-helper
 python3 scripts/install_claude_bridge.py
 # 输入服务端签的 API Key，脚本自动装 launchd 服务
 ```
@@ -180,7 +180,7 @@ python3 scripts/install_claude_bridge.py
 ## 目录结构
 
 ```
-weixin-agent/
+wechat-Agent-helper/
 ├── app/                      # 后端 Python
 │   ├── main.py               # 入口：iLink poller + FastAPI
 │   ├── api.py                # 所有 HTTP / WebSocket 路由
