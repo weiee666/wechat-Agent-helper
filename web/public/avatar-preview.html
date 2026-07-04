@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>头像风格预览</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Helvetica Neue", sans-serif;
+      background: #f4f5f7; color: #1c1c1e; margin: 0; padding: 32px 24px;
+    }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    .sub { color: #86868b; font-size: 14px; margin: 0 0 24px; }
+    .row {
+      background: #fff; border-radius: 12px; padding: 16px 20px; margin-bottom: 12px;
+      display: flex; align-items: center; gap: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.05);
+    }
+    .style-name {
+      width: 160px; flex-shrink: 0;
+      font-weight: 600; font-size: 14px;
+    }
+    .style-desc {
+      color: #86868b; font-size: 12px; margin-top: 3px; font-weight: 400;
+    }
+    .row .avatars {
+      display: flex; gap: 20px; align-items: center; flex: 1; flex-wrap: wrap;
+    }
+    .avatar-cell {
+      display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .avatar-cell img {
+      width: 56px; height: 56px; border-radius: 50%; display: block;
+      object-fit: cover; background: #fff;
+      box-shadow: 0 1px 2px rgba(0,0,0,.08);
+    }
+    .avatar-cell .label {
+      font-size: 11px; color: #6e6e73;
+    }
+    .action {
+      margin-top: 20px; padding: 14px 20px; background: #fffef0;
+      border: 1px solid #f0d060; border-radius: 8px; font-size: 13px;
+    }
+    code {
+      background: #f0f0f0; padding: 2px 5px; border-radius: 3px; font-size: 12px;
+    }
+    button {
+      margin-left: 8px; padding: 4px 12px; font-size: 12px; border: 1px solid #ccc;
+      background: #fff; border-radius: 4px; cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>头像风格预览</h1>
+  <p class="sub">4 个角色 × 各种 DiceBear 风格。选中风格告诉 Claude 换即可。（Claude 头像默认全部走 initials「C」+ 橙色，也可以跟随风格变化）</p>
+
+  <div id="styles"></div>
+
+  <div class="action">
+    <b>当前使用</b>：<code>pixel-art</code>（user / bot / teacher / peer_bot）+ <code>initials「C」</code>（claude）<br><br>
+    看中哪种直接告诉我"换成 xxx 风格" —— seed 也可以指定（比如 <code>seed=WeiBo</code> 让人像更符合你的名字）。
+  </div>
+
+  <script>
+    // 每种 DiceBear 风格：一个 label + 说明 + 每种角色对应的完整 URL
+    const STYLES = [
+      { name: 'pixel-art',           desc: '像素画/复古游戏感（当前用的）',        userStyle: 'pixel-art' },
+      { name: 'micah',               desc: '扁平几何设计感',                       userStyle: 'micah' },
+      { name: 'avataaars',           desc: '卡通丰富，Sketch 风',                  userStyle: 'avataaars' },
+      { name: 'personas',            desc: '圆润卡通，有点 Slack 风',              userStyle: 'personas' },
+      { name: 'notionists',          desc: 'Notion 手绘风',                        userStyle: 'notionists' },
+      { name: 'notionists-neutral',  desc: 'Notion 手绘无饰品',                    userStyle: 'notionists-neutral' },
+      { name: 'lorelei',             desc: '漂亮线条人像',                         userStyle: 'lorelei' },
+      { name: 'open-peeps',          desc: '大头线条人像',                         userStyle: 'open-peeps' },
+      { name: 'adventurer',          desc: '冒险家角色',                           userStyle: 'adventurer' },
+      { name: 'big-smile',           desc: '大笑脸风格',                           userStyle: 'big-smile' },
+      { name: 'big-ears',            desc: '大耳朵可爱',                           userStyle: 'big-ears' },
+      { name: 'fun-emoji',           desc: '花哨大表情',                           userStyle: 'fun-emoji' },
+      { name: 'miniavs',             desc: '极简迷你头像',                         userStyle: 'miniavs' },
+      { name: 'thumbs',              desc: '大拇指风格（好玩）',                   userStyle: 'thumbs' },
+      { name: 'croodles',            desc: '涂鸦画风',                             userStyle: 'croodles' },
+    ]
+
+    // Bot / peer_bot 全部走 bottts-neutral（机器人）—— 无论选什么风格
+    const BOT_STYLE = 'bottts-neutral'
+
+    // 角色 → seed（保持一致，切换风格时形象连续）
+    const SEEDS = { user: 'Weibo', teacher: 'Professor', bot: 'Assistant', peer_bot: 'Peer' }
+    const BG = {
+      user:     'b6e3f4,c0aede',
+      bot:      '00d6b9,4ecdc4',
+      teacher:  'c084fc,a78bfa',
+      peer_bot: 'fca5a5,f87171',
+    }
+
+    function urlFor(role, style) {
+      // bot / peer_bot 强制机器人风格
+      const useStyle = (role === 'bot' || role === 'peer_bot') ? BOT_STYLE : style
+      const seed = SEEDS[role]
+      const bg = BG[role]
+      return `https://api.dicebear.com/9.x/${useStyle}/svg?seed=${seed}&backgroundColor=${bg}&backgroundType=gradientLinear`
+    }
+    function claudeUrl() {
+      return 'https://api.dicebear.com/9.x/initials/svg?seed=Claude&backgroundColor=D97757&fontWeight=600&textColor=ffffff'
+    }
+
+    const ROLES = ['user', 'bot', 'teacher', 'claude', 'peer_bot']
+    const ROLE_LABEL = { user: '用户', bot: '助手', teacher: '老师', claude: 'Claude', peer_bot: '对方助手' }
+
+    const $ = document.getElementById('styles')
+    for (const s of STYLES) {
+      const row = document.createElement('div')
+      row.className = 'row'
+      row.innerHTML = `
+        <div class="style-name">${s.name}<div class="style-desc">${s.desc}</div></div>
+        <div class="avatars" id="avatars-${s.name}"></div>
+      `
+      $.appendChild(row)
+      const grid = row.querySelector('.avatars')
+      for (const role of ROLES) {
+        const cell = document.createElement('div')
+        cell.className = 'avatar-cell'
+        const url = role === 'claude' ? claudeUrl() : urlFor(role, s.userStyle)
+        cell.innerHTML = `<img src="${url}" alt="${role}"><div class="label">${ROLE_LABEL[role]}</div>`
+        grid.appendChild(cell)
+      }
+    }
+  </script>
+</body>
+</html>
