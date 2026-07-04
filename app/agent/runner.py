@@ -306,7 +306,24 @@ class VoiceTaskAgent:
 
         # 前缀标注来源（写进历史里，用户后面可回顾）
         prefixed = f"[来自 {from_display_name} 的助手] {message}"
-        ctx = memory_bridge.get_context(target_user_id, prefixed)
+        # ── 关键：跨 Agent 对话的历史用 pair session，绝不污染 target 的 self 短期记忆 ──
+        # target 的 self session 是 target 用户直接跟自己 Agent 聊天的记录，
+        # 混进 Agent 间对话会让用户看板 self tab 显示别人聊天内容。
+        from app.core.memory.short_term import ShortTermMemory
+        from app.core.memory.long_term import LongTermMemory
+        from app.models.schemas import MemoryContext
+        _x, _y = sorted([target_user_id, from_user_id])
+        _pair_sid = f"pair:{_x}|{_y}"
+        _pair_history = ShortTermMemory().get_history(_pair_sid)
+        try:
+            _long_items = LongTermMemory().recall(prefixed, target_user_id, top_k=5)
+        except Exception:  # noqa: BLE001
+            _long_items = []
+        ctx = MemoryContext(
+            session_id=_pair_sid,
+            short_term_messages=_pair_history,
+            long_term_items=_long_items,
+        )
 
         # System prompt 补丁：明确身份 + 鼓励多轮对话
         system_extra = (
@@ -320,8 +337,15 @@ class VoiceTaskAgent:
             f"2. 社交寒暄（打招呼、道谢）：直接得体回一句就够。\n"
             f"3. **信息类问题**：知道就答；不知道但对方问题里有线索，可以调 call_agent 反问对方澄清"
             f"（比如对方问「什么时候有空」，你可以反问「你想约什么时间段？」）。\n"
-            f"4. **需要用户拍板的事**（重要决定、约见面时间、承诺任务）：答一句「这需要 {target_display} 本人确认，"
-            f"我稍后帮 ta 转达」就好，不要擅自代 ta 承诺。\n"
+            f"4. **需要用户拍板的事**（约时间/承诺来赴约/带什么/家里有没有/口味偏好/一切"
+            f"你不知道答案的具体事实）：**绝对不要瞎编，绝对不要代 {target_display} 承诺**。"
+            f"你有两步要做：\n"
+            f"   (a) 调 notify_my_user 工具把问题推给 {target_display} 的微信，让 ta 亲自定夺，"
+            f"例如「{from_display_name} 想请你今晚来家里吃饭，问你几点方便？有没有忌口？」；\n"
+            f"   (b) 给对方 Agent 回一句「我需要问下 {target_display} 本人，等 ta 回复我立刻告诉你」"
+            f"就结束本轮，让对方等。\n"
+            f"   之后 {target_display} 在微信里回你的答复 —— 到时候你再走 call_agent 主动转达给对方 Agent。\n"
+            f"   反例：不要说「危呃呃说 5 点过去」「危呃呃说家里酒够」这种编造 —— 你根本没问 ta！\n"
             f"5. **需要澄清才能完成的事**：主动调 call_agent 追问对方（比如对方说「帮我问下时间」，"
             f"你要反问「什么时间段？什么时区？」才能给出有意义的回复）。轻信直接答会让协作低质量。\n"
             f"6. 一轮完成不了的**不要硬要一轮完成**——追问几轮换来准确答复远比一句敷衍强。\n"
@@ -368,12 +392,10 @@ class VoiceTaskAgent:
                         out = f"[工具 {tc['name']} 执行失败] {e}"
                 out = str(out)
                 _say("tool_out", out[:400])
-                if tc["name"] == "structure_task":
-                    memory_bridge.store_longterm(target_user_id, out, {"type": "task"})
                 messages.append(ToolMessage(content=out, tool_call_id=tc["id"]))
-        # 记录到 target 短期记忆
-        memory_bridge.save_turn(target_user_id, MessageRole.USER, prefixed)
-        memory_bridge.save_turn(target_user_id, MessageRole.ASSISTANT, reply)
+        # 不在这里落 pair 库 —— tools.call_agent 在 handle_agent_message 返回后
+        # 会调 _persist_pair 统一落 pair session（sender 和 target 视角一致）。
+        # 关键：绝对不写到 target 的 self session（那会污染用户的"我和助手" tab）。
 
         # 授权模式：走 bus.request_authorization，target 微信收到"允许/不允许"
         # 默认（直连）模式：什么都不做，reply 由 call_agent 拿走后同步返回给 sender LLM
