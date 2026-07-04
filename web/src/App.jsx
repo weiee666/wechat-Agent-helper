@@ -12,37 +12,93 @@ import ParticipantsGroup from './components/ParticipantsGroup.jsx'
 const { Header, Sider, Content } = Layout
 const { Title, Text } = Typography
 
-// token / user_id 优先级：URL 参数 > localStorage
-// URL 拿到后立刻清 URL + 存 localStorage 供下次刷新
-const LS_KEY = 'weixin-dashboard-auth'
+// 多用户 auth：每个 user_id 独立 localStorage 记录，URL 保留 user_id 定位
+//   - URL /dashboard.html?user_id=X&token=Y  → 首次登录，存 { X: Y }，URL 清 token 保留 user_id
+//   - URL /dashboard.html?user_id=X         → 刷新，按 user_id 从 localStorage 取 token
+//   - URL /dashboard.html                    → 无 user_id，回落到 lastUid
+// 一次性迁移旧 key（老版本共享单个 auth）到新格式
+const LS_PREFIX = 'weixin-dashboard-auth:'
+const LS_LAST_UID = 'weixin-dashboard-last-uid'
+const LS_OLD_KEY = 'weixin-dashboard-auth'
+
+function migrateOldKey() {
+  try {
+    const raw = localStorage.getItem(LS_OLD_KEY)
+    if (!raw) return
+    const old = JSON.parse(raw)
+    if (old && old.user_id && old.token) {
+      localStorage.setItem(LS_PREFIX + old.user_id, JSON.stringify(old))
+      localStorage.setItem(LS_LAST_UID, old.user_id)
+    }
+    localStorage.removeItem(LS_OLD_KEY)
+  } catch {}
+}
+migrateOldKey()
+
 function readAuth() {
   const p = new URLSearchParams(location.search)
   const uidParam = p.get('user_id')
   const tokenParam = p.get('token')
+
+  // Case 1: URL 里带完整 auth（首次点微信链接过来）
   if (uidParam && tokenParam) {
     const auth = { user_id: uidParam, token: tokenParam }
-    try { localStorage.setItem(LS_KEY, JSON.stringify(auth)) } catch {}
-    try { history.replaceState(null, '', location.pathname + location.hash) } catch {}
+    try {
+      localStorage.setItem(LS_PREFIX + uidParam, JSON.stringify(auth))
+      localStorage.setItem(LS_LAST_UID, uidParam)
+    } catch {}
+    // URL 里删掉 token 但保留 user_id：刷新时凭 user_id 定位 localStorage 记录
+    try {
+      const q = 'user_id=' + encodeURIComponent(uidParam)
+      history.replaceState(null, '', location.pathname + '?' + q + location.hash)
+    } catch {}
     return auth
   }
+
+  // Case 2: URL 只有 user_id（刷新或书签）
+  if (uidParam) {
+    try {
+      const raw = localStorage.getItem(LS_PREFIX + uidParam)
+      if (raw) {
+        try { localStorage.setItem(LS_LAST_UID, uidParam) } catch {}
+        return JSON.parse(raw)
+      }
+    } catch {}
+    return { user_id: uidParam, token: '' }
+  }
+
+  // Case 3: URL 空 → 回落到最近一次登录的用户
   try {
-    const raw = localStorage.getItem(LS_KEY)
-    if (raw) return JSON.parse(raw)
+    const lastUid = localStorage.getItem(LS_LAST_UID)
+    if (lastUid) {
+      const raw = localStorage.getItem(LS_PREFIX + lastUid)
+      if (raw) {
+        // 把 user_id 补回 URL 让下次刷新明确
+        try {
+          const q = 'user_id=' + encodeURIComponent(lastUid)
+          history.replaceState(null, '', location.pathname + '?' + q + location.hash)
+        } catch {}
+        return JSON.parse(raw)
+      }
+    }
   } catch {}
   return { user_id: '', token: '' }
 }
-function saveToken(newToken) {
-  if (!newToken) return
+
+function saveToken(uid, newToken) {
+  if (!uid || !newToken) return
   try {
-    const raw = localStorage.getItem(LS_KEY)
-    const cur = raw ? JSON.parse(raw) : {}
-    cur.token = newToken
-    localStorage.setItem(LS_KEY, JSON.stringify(cur))
+    localStorage.setItem(LS_PREFIX + uid, JSON.stringify({ user_id: uid, token: newToken }))
   } catch {}
 }
-function clearAuth() {
-  try { localStorage.removeItem(LS_KEY) } catch {}
+
+function clearAuth(uid) {
+  try {
+    if (uid) localStorage.removeItem(LS_PREFIX + uid)
+    // 不清 LS_LAST_UID —— 让用户可以尝试再打开旧链接
+  } catch {}
 }
+
 const initial = readAuth()
 let userId = initial.user_id
 let token = initial.token
@@ -117,7 +173,7 @@ export default function App() {
         const cfg = await api.getConfig(userId, token)
         if (cfg.me) setMe(cfg.me)
         // 滑动续期：把服务器新签的 token 存 localStorage，下次刷新页面就是新有效期
-        if (cfg.refresh_token) saveToken(cfg.refresh_token)
+        if (cfg.refresh_token) saveToken(userId, cfg.refresh_token)
 
         // 一次性构建完整的 conversations dict（默认三个 tab + 落库过的 pair）
         const convsData = await api.getConversations(userId, token)
@@ -180,7 +236,7 @@ export default function App() {
         // 鉴权失败：清 localStorage 避免用死的 token 反复重试
         const msg = String(e.message || e)
         if (msg.includes('token') || msg.includes('鉴权') || msg.includes('401')) {
-          clearAuth()
+          clearAuth(userId)
         }
         setError(msg)
       }
