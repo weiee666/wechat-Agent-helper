@@ -1,6 +1,10 @@
 # weixin-agent
 
-微信里跑的多 Agent 系统。每个人在微信里有自己的 AI 助手，助手之间可以互相通话、代传消息、找共享的老师 Agent，也可以调你 Mac 上的 Claude Code。配了一个飞书风格的看板，能实时看到所有对话，包括 Agent 之间私下聊了啥。
+微信里跑的多 Agent 系统。
+1. 通过腾讯新开源的iLink协议，每个人在微信里有自己的 AI 助手，你和你的助手可以在微信里直接对话。
+2. 通过A2A协议实现用户的助手之间可以互相通话。
+3. 在平台上设计了公共的Agent供用户的AI助手调用，同时平台可以接入自己本机的Claude Code，参考。
+4. 通过跟助手发送 **“看板”**，能实时看到所有对话，包括 Agent 之间私下聊了啥。
 
 ## 采用的技术
 
@@ -15,13 +19,13 @@
 - HMAC-SHA256 JWT 做看板认证，7 天滑动续期
 
 **前端**（React 18 + Vite）
-- Semi Design（飞书官方开源组件库，配色也用飞书主蓝 `#3370FF`）
+- Semi Design
 - DiceBear 出 SVG 头像（shapes / thumbs / initials 三种风格）
 - Pusher-js 订阅私有 channel
 - marked + DOMPurify 渲染 Markdown 顺便挡 XSS
 
 **本地 Claude 集成**
-- 反向 WebSocket：Mac 上的 daemon 主动连服务器（服务器在墙内，Mac 也没公网 IP，只能反着连）
+- 反向 WebSocket：Mac 上的 daemon 主动连服务器
 - launchd 让 daemon 在 Mac 上后台常驻，开机自启，崩了自动拉起
 - `claude --print --output-format json --resume <sid>` 保持每个用户的 Claude session
 
@@ -36,10 +40,10 @@
 
 **你需要准备**
 - 能跑 Python 3.11+ 的机器（服务器或本地都行）
-- 一个 iLink Bot 账号和一个微信号
+- 一个 iLink Bot 账号和一个微信号（如果想要测试对话，最好微信申请测试账号，然后手机端应用复制）
 - DeepSeek API key、Pusher 应用（要 `app_id / key / secret / cluster` 四样）
-- 想联网搜索的话再来个 Tavily API key
-- 想让助手调 Claude Code 的话，再准备一台装了 Claude Code 的 Mac
+- Tavily API key（联网搜索tool需要）
+- 想让助手调 Claude Code 的话，需要本地本地已安装Claude Code
 
 **跑起后端**
 
@@ -86,7 +90,58 @@ npm run dev
 # 起在本地 :5173，需要 vercel-cli 或者手写个 proxy 把 /api 转到后端
 ```
 
-部到 Vercel：Root Directory 选 `web`，环境变量 `TENCENT_API_BASE=http://<你的服务器>:8080`，剩下 Vite 自己认。
+**把前端部到网上（两条路，二选一）**
+
+看板前端的架构是"静态 SPA 加一层轻量代理"。SPA 本身可以放任何静态托管上；代理层的作用是让浏览器不直连你后端服务器，把 `/api/dashboard/*` 请求转到 `http://<你的服务器>:8080`。为什么要这层代理？两个原因：一是国内浏览器直连你腾讯云的 8080 端口经常被路由问题拖慢或者拦截，走边缘节点更稳；二是你的看板 URL 大概率上 HTTPS，浏览器不允许 HTTPS 页面直接 fetch HTTP 后端（mixed content 报错），代理层帮你把这层协议差异吃掉。
+
+**路 A：托管到 Vercel（我在用的，最省事）**
+
+Vercel 免费额度够个人用，静态托管和 serverless functions 一起给了。步骤：
+
+1. 在 Vercel 后台点 Add New Project，导入这个 GitHub 仓库
+2. Configure 里 **Root Directory** 选 `web`（不要选仓库根，因为 Vite 项目在 `web/` 下）
+3. Framework Preset 那栏 Vercel 会自动认成 Vite，Build Command 和 Output Directory 都用默认
+4. Environment Variables 里加一个 `TENCENT_API_BASE`，值填 `http://<你的服务器公网 IP 或域名>:8080`
+5. Deploy
+
+代理层就是仓库里 `web/api/dashboard/*.js` 那几个文件，Vercel 会把它们识别成 serverless functions 自动部署。浏览器请求 `/api/dashboard/config` 会走这里再转到你后端。你只需要提供后端 URL，其他什么都不用改。
+
+**路 B：自己搭（不想用 Vercel，或者想全套自己控）**
+
+前端和代理都放你自己的服务器上，用 nginx 反代做代理层：
+
+1. 本地 `cd web && npm run build`，生成 `web/dist/` 是纯静态文件
+2. 把 `dist/` 传到服务器，比如 `/var/www/weixin-dashboard/`
+3. nginx 配置，静态文件走托管，`/api/dashboard/*` 反代到 8080：
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name dashboard.你的域名.com;
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/key.pem;
+
+    # SPA 静态资源
+    root /var/www/weixin-dashboard;
+    index index.html;
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 代理层：把 /api/dashboard/* 转到后端
+    location /api/dashboard/ {
+        # 把 Vercel serverless functions 里的转发逻辑手动搬过来，
+        # 或者简单点：直接反代整个 /panel/* 到后端
+        proxy_pass http://127.0.0.1:8080/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+注意路径映射：Vercel serverless 版本里 `/api/dashboard/config` 会被转成 `/session/{uid}/config`（还带鉴权头），nginx 直接 `proxy_pass` 不会做这层转换。要么你在后端加一层路由别名，要么把 `web/api/dashboard/*.js` 里那点 Node.js 转发逻辑改写成 nginx `rewrite` 规则。想省事就走 A。
+
+最后不管走哪条路，都要把 `.env` 里的 `DASHBOARD_URL_BASE` 改成你实际用的 URL：Vercel 给的 `https://xxx.vercel.app/dashboard.html`，或者你自己域名 `https://dashboard.你的域名.com/dashboard.html`。
 
 **Claude Code 桥接（可选）**
 
@@ -100,7 +155,7 @@ python3 scripts/install_claude_bridge.py
 
 装完之后 Mac 后台常驻，服务器上的 Claude Agent 就自动 online 了。
 
-**开始用**
+**成功**
 
 在微信里直接跟 bot 说话就行。想看背后到底发生了啥，跟 bot 说一句「看板」，它会回一个 URL，点进去是实时对话面板。
 
@@ -108,21 +163,17 @@ python3 scripts/install_claude_bridge.py
 
 ## 功能介绍
 
-**微信里的私人助手**：每个用户在微信里有自己的 Agent。可以日常聊天、记事情、查资料、给自己或助手起名字。Agent 带短期记忆（SQLite 里的滑动窗口，加 LLM 压缩超长历史）和长期记忆（用户口述过的事实、任务）。
+- **微信里的私人助手**：每个用户在微信里有自己的 Agent。可以日常聊天、记事情、查资料、给自己或助手起名字。Agent 带短期记忆（SQLite 里的滑动窗口，加 LLM 压缩超长历史）和长期记忆（用户口述过的事实、任务）。
 
-**Agent 之间可以互相通话**：你能让自己的助手去联系另一个人的助手。链路是「你 → 你的助手 → 对方的助手 → 对方本人」。你的助手先跟对方的助手把事情谈清楚。碰上要对方本人拍板的事（几点方便、家里有没有酒），对方的助手会调 `notify_my_user` 工具把问题推到对方微信。对方回复了，助手再把答案带回你的助手，你的助手综合成一句自然的话告诉你。
+- **Agent 之间可以互相通话**：你能让自己的助手去联系另一个人的助手。链路是「你 → 你的助手 → 对方的助手 → 对方本人」。你的助手先跟对方的助手把事情谈清楚。碰上要对方本人拍板的事（几点方便、家里有没有酒），对方的助手会调 `notify_my_user` 工具把问题推到对方微信。对方回复了，助手再把答案带回你的助手，你的助手综合成一句自然的话告诉你。
 
-**老师 Agent**：跨用户共享的教学 Agent，用苏格拉底追问加费曼类比讲解概念。想搞懂难题就说「问老师 XXX」，或者在看板老师 tab 里直接聊。每个用户跟老师是独立 session，历史互不干扰。
+- **老师 Agent**（可定制化公共Agent）：跨用户共享的教学 Agent。背后是一个Antrophic提供的教学skill，为开发者自己在搞懂不懂的知识点使用，可以在微信里让AI助手去找**老师Agent**提问，也可以在看板中直接向**老师Agent**提问。每个用户跟老师是独立 session，历史互不干扰。
 
-**Claude Code Agent**：让微信里的助手真的能跑代码、读写文件、执行 bash 命令。走的是反向 WebSocket，连到你 Mac 上跑的 Claude Code CLI。说「找 Claude 帮我写个脚本」就行。session 走 `--resume` 延续，多轮任务接着上次的往下走。
+- **Claude Code Agent**：让微信里的助手真的能跑代码、读写文件、执行 bash 命令。走的是反向 WebSocket，连到你 Mac 上跑的 Claude Code CLI。说「找 Claude 帮我写个脚本」就行。session 走 `--resume` 延续，多轮任务接着上次的往下走。
 
-**实时看板**：飞书美学的 React SPA（Semi Design 组件，飞书主蓝 `#3370FF`）。左侧栏是所有会话：跟自己助手、跟老师、跟 Claude，每一对 Agent-Agent 对话也各自一个 tab。右上角圆形头像重叠展示当前 channel 里有谁。所有对话都落 SQLite 永久保留，刷新看板、换 token、服务器重启都不会丢。
+- **实时看板**：左侧栏是所有会话：跟自己助手、跟老师、跟 Claude，每一对 Agent-Agent 对话也各自一个 tab。右上角圆形头像重叠展示当前 channel 里有谁。
 
-**多用户互不冲突**：同一个浏览器同时开两个用户的看板 tab 各看各的，刷新不串号。URL 保留 user_id 用来定位 localStorage 里对应记录。token 走 JWT 无状态，每次访问自动续到当下加 7 天。
-
-**双环境隔离**：main 分支自动部到 prod（`:8080`），beta 分支自动部到 beta（`:7997`）。systemd 两个 service 分开跑，数据库也分开。CI/CD 走 GitHub Actions，`git push` 之后大概一分钟自动上线。
-
-**扫码开通**：新用户加入走 `/connect` 页，用微信扫二维码就能开一个新 iLink bot 账号，热起收消息线程，不用运维介入。
+- **扫码开通**：新用户加入走 `/connect` 页，用微信扫二维码就能开一个新 iLink bot 账号，热起收消息线程，不用运维介入。
 
 ---
 
@@ -174,16 +225,3 @@ weixin-agent/
 │   └── vercel.json
 └── data/                     # 运行态：SQLite / 账号 tokens（.gitignore）
 ```
-
----
-
-## 一些设计上的取舍
-
-- **A2A 对话双方看板都能看到**：Agent 之间对话推 pusher 到双方 channel，pair session 落 SQLite 双方共用一份。两边看板都能恢复出来。
-- **助手代问的老师 / Claude 单独一个 pair tab**：老师和 Claude 有两种身份。用户直接聊走 `teacher:{uid}` / `claude:{uid}` session；助手代问走 `pair:{sorted uid|system:xxx}` session。看板里分成两个 tab，历史互不污染。
-- **event loop 不阻塞**：panel_chat 里的 LLM 调用都走 `asyncio.to_thread` 丢到 executor thread，不占 uvicorn 主 loop。daemon WS 和其他 HTTP 请求不会因为 LLM 慢卡死。
-- **Claude session 延续**：Mac daemon 记 per-user 的 Claude session_id，下次同一用户的请求带 `--resume`，多轮任务接着上次的往下走。
-
----
-
-仓库：https://github.com/weiee666/weixin-agent
